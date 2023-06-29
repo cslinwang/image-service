@@ -20,7 +20,6 @@ use std::os::unix::fs::FileTypeExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use crate::deduplicate::SqliteDatabase;
 use anyhow::{bail, Context, Result};
 use clap::parser::ValueSource;
 use clap::{Arg, ArgAction, ArgMatches, Command as App};
@@ -59,6 +58,7 @@ mod inspect;
 mod stat;
 mod unpack;
 mod validator;
+
 const BLOB_ID_MAXIMUM_LENGTH: usize = 255;
 
 #[derive(Serialize, Deserialize, Default)]
@@ -357,25 +357,16 @@ fn prepare_cmd_args(bti_string: &'static str) -> App {
                 App::new("save")
                     .about("Save chunk info to a database")
                     .arg(
+                        Arg::new("BOOTSTRAP")
+                            .help("File path of RAFS metadata")
+                            .required_unless_present("bootstrap"),
+                    )
+                    .arg(
                         Arg::new("bootstrap")
-                            .long("bootstrap")
                             .short('B')
-                            .help("File path to save the generated RAFS metadata blob")
-                            .required_unless_present_any(&["blob-dir", "blob-inline-meta"])
-                            .conflicts_with("blob-inline-meta"),
-                    )
-                    .arg(
-                        Arg::new("database-path")
-                            .long("database-path")
-                            .help("File path of metadata database")
-                            .default_value("./metadata.db")
-                            .required(false),
-                    )
-                    .arg(
-                        Arg::new("database-type")
-                            .long("database")
-                            .help("The type of metadata database, currently supported is SQLite.")
-                            .default_value("Sqlite")
+                            .long("bootstrap")
+                            .help("[Deprecated] File path of RAFS meta blob/bootstrap")
+                            .conflicts_with("BOOTSTRAP")
                             .required(false),
                     )
                     .arg(
@@ -741,25 +732,14 @@ fn main() -> Result<()> {
     register_tracer!(TraceClass::Timing, TimingTracerClass);
     register_tracer!(TraceClass::Event, EventTracerClass);
 
-    // if let Some(matches) = cmd.subcommand_matches("create") {
-    //     Command::create(matches, &build_info)
-    // } else if let Some(matches) = cmd.subcommand_matches("chunkdict") {
-    //     if let Some(sub_matches) = matches.subcommand_matches("save") {
-    //         Command::chunkdict_save(sub_matches)
-    //     } else {
-    //         println!("{}", usage);
-    //         Ok(())
-    //  subcommand_name
-    //     }
     if let Some(matches) = cmd.subcommand_matches("create") {
         Command::create(matches, &build_info)
     } else if let Some(matches) = cmd.subcommand_matches("chunkdict") {
-        match matches.subcommand_name() {
-            Some("save") => Command::chunkdict_save(matches.subcommand_matches("save").unwrap()),
-            _ => {
-                println!("{}", usage);
-                Ok(())
-            }
+        if let Some(sub_matches) = matches.subcommand_matches("save") {
+            Command::chunkdict_save(sub_matches)
+        } else {
+            println!("{}", usage);
+            Ok(())
         }
     } else if let Some(matches) = cmd.subcommand_matches("merge") {
         Command::merge(matches, &build_info)
@@ -1111,19 +1091,16 @@ impl Command {
     fn chunkdict_save(matches: &ArgMatches) -> Result<()> {
         let bootstrap_path = Self::get_bootstrap(matches)?;
         let config = Self::get_configuration(matches)?;
-        let db_path = matches.get_one::<String>("database-path").unwrap();
-        let _db_type = matches.get_one::<String>("database-type").unwrap();
-        debug!("db_path: {}", db_path);
         // For backward compatibility with v2.1
         config
             .internal
             .set_blob_accessible(matches.get_one::<String>("bootstrap").is_none());
 
-        let mut deduplicate = Deduplicate::<SqliteDatabase>::new(bootstrap_path, config, db_path)?;
-        let blobs: Vec<Arc<nydus_storage::device::BlobInfo>> = deduplicate
-            .save_metadata(Some(&db_path))
+        let mut deduplicate = Deduplicate::new(bootstrap_path, Arc::clone(&config))?;
+        let blobs = deduplicate
+            .save_metadata_to_database()
             .with_context(|| format!("failed to check bootstrap {:?}", bootstrap_path))?;
-        println!("RAFS filesystem metadata is saved:");
+        println!("RAFS filesystem metadata is saved.");
         let mut blob_ids = Vec::new();
         for (idx, blob) in blobs.iter().enumerate() {
             println!(
