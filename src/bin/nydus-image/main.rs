@@ -13,7 +13,7 @@ extern crate log;
 extern crate serde_json;
 #[macro_use]
 extern crate lazy_static;
-
+use crate::deduplicate::SqliteDatabase;
 use std::convert::TryFrom;
 use std::fs::{self, metadata, DirEntry, File, OpenOptions};
 use std::os::unix::fs::FileTypeExt;
@@ -44,6 +44,7 @@ use nydus_utils::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::deduplicate::Deduplicate;
 use crate::unpack::{OCIUnpacker, Unpacker};
 use crate::validator::Validator;
 
@@ -52,6 +53,7 @@ use nydus_service::ServiceArgs;
 #[cfg(target_os = "linux")]
 use std::str::FromStr;
 
+mod deduplicate;
 mod inspect;
 mod stat;
 mod unpack;
@@ -347,6 +349,56 @@ fn prepare_cmd_args(bti_string: &'static str) -> App {
                     arg_output_json.clone(),
                 )
         );
+
+    let app = app.subcommand(
+            App::new("chunkdict")
+                .about("deduplicate RAFS filesystem metadata")
+                .subcommand(
+                    App::new("save")
+                        .about("Save chunk info to a database")
+                        .arg(
+                            Arg::new("bootstrap")
+                            .short('B')
+                            .long("bootstrap")
+                            .help("File path of RAFS meta blob/bootstrap")
+                            .conflicts_with("BOOTSTRAP")
+                            .required(false),
+                        )
+                    .arg(
+                        Arg::new("database-path")
+                            .long("database-path")
+                            .help("File path of metadata database")
+                            .default_value("./metadata.db")
+                            .required(false),
+                    )
+                    .arg(
+                        Arg::new("database-type")
+                            .long("database-type")
+                            .help("The type of metadata database, currently supported is Sqlite.")
+                            .default_value("Sqlite")
+                            .required(false),
+                    )
+                    .arg(
+                        Arg::new("blob-dir")
+                            .long("blob-dir")
+                            .short('D')
+                            .conflicts_with("config")
+                            .help(
+                                "Directory for localfs storage backend, hosting data blobs and cache files",
+                            ),
+                    )
+                    .arg(arg_config.clone())
+                    .arg(
+                        Arg::new("verbose")
+                            .long("verbose")
+                            .short('v')
+                            .help("Output message in verbose mode")
+                            .action(ArgAction::SetTrue)
+                            .required(false),
+                    )
+                    .arg(arg_output_json.clone())
+            )
+    );
 
     let app = app.subcommand(
         App::new("merge")
@@ -691,6 +743,14 @@ fn main() -> Result<()> {
 
     if let Some(matches) = cmd.subcommand_matches("create") {
         Command::create(matches, &build_info)
+    } else if let Some(matches) = cmd.subcommand_matches("chunkdict") {
+        match matches.subcommand_name() {
+            Some("save") => Command::chunkdict_save(matches.subcommand_matches("save").unwrap()),
+            _ => {
+                println!("{}", usage);
+                Ok(())
+            }
+        }
     } else if let Some(matches) = cmd.subcommand_matches("merge") {
         Command::merge(matches, &build_info)
     } else if let Some(matches) = cmd.subcommand_matches("check") {
@@ -1036,6 +1096,49 @@ impl Command {
         event_tracer!("egid", "{}", getegid());
         info!("successfully built RAFS filesystem: \n{}", build_output);
         OutputSerializer::dump(matches, build_output, build_info)
+    }
+
+    fn chunkdict_save(matches: &ArgMatches) -> Result<()> {
+        let bootstrap_path = Self::get_bootstrap(matches)?;
+        let config = Self::get_configuration(matches)?;
+        let db_path = matches.get_one::<String>("database-path").unwrap();
+        let db_type = matches.get_one::<String>("database-type").unwrap();
+        debug!("db_path: {}", db_path);
+        debug!("db_type: {}", db_type);
+        // For backward compatibility with v2.1
+        config
+            .internal
+            .set_blob_accessible(matches.get_one::<String>("bootstrap").is_none());
+
+        let blobs: Vec<Arc<nydus_storage::device::BlobInfo>> = match db_type.as_str() {
+            "Sqlite" => {
+                let mut deduplicate =
+                    Deduplicate::<SqliteDatabase>::new(bootstrap_path, config, db_path)?;
+                deduplicate
+                    .save_metadata(Some(&db_path))
+                    .with_context(|| format!("failed to check bootstrap {:?}", bootstrap_path))?
+            }
+            // Add other cases for different database types if needed
+            _ => {
+                return Err(anyhow!("Unsupported database type"));
+            }
+        };
+        println!("RAFS filesystem metadata is saved:");
+        let mut blob_ids = Vec::new();
+        for (idx, blob) in blobs.iter().enumerate() {
+            println!(
+                "\t {}: {}, compressed data size 0x{:x}, compressed file size 0x{:x}, uncompressed file size 0x{:x}, chunks: 0x{:x}, features: {}",
+                idx,
+                blob.blob_id(),
+                blob.compressed_data_size(),
+                blob.compressed_size(),
+                blob.uncompressed_size(),
+                blob.chunk_count(),
+                format_blob_features(blob.features()),
+            );
+            blob_ids.push(blob.blob_id().to_string());
+        }
+        Ok(())
     }
 
     fn merge(matches: &ArgMatches, build_info: &BuildTimeInfo) -> Result<()> {
