@@ -3,13 +3,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Deduplicate for Chunk.
-
 use anyhow::{Context, Result};
 use nydus_api::ConfigV2;
 use nydus_builder::Tree;
 use nydus_rafs::metadata::RafsSuper;
 use nydus_storage::device::BlobInfo;
-use rusqlite::{params, Connection};
+use rusqlite::Connection;
+use std::error::Error;
 use std::fs;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -161,18 +161,21 @@ impl Deduplicate<SqliteDatabase> {
     }
 }
 
-pub trait Table: Sync + Send + Sized + 'static {
+pub trait Table<Conn, Err>: Sync + Send + Sized + 'static
+where
+    Err: Error + 'static,
+{
     /// clear table.
-    fn clear(conn: &Connection) -> Result<(), rusqlite::Error>;
+    fn clear(conn: &Conn) -> Result<(), Err>;
 
     /// create table.
-    fn create(conn: &Connection) -> Result<(), rusqlite::Error>;
+    fn create(conn: &Conn) -> Result<(), Err>;
 
     /// insert data.
-    fn insert(conn: &Connection, table: &Self) -> Result<(), rusqlite::Error>;
+    fn insert(conn: &Conn, table: &Self) -> Result<(), Err>;
 
     /// select data.
-    fn list(conn: &Connection) -> Result<Vec<Self>, rusqlite::Error>;
+    fn list(conn: &Conn) -> Result<Vec<Self>, Err>;
 }
 
 #[derive(Debug)]
@@ -185,16 +188,16 @@ pub struct ChunkTable {
     chunk_uncompressed_offset: u64,
 }
 
-impl Table for ChunkTable {
-    fn clear(conn: &Connection) -> Result<(), rusqlite::Error> {
+impl Table<rusqlite::Connection, rusqlite::Error> for ChunkTable {
+    fn clear(conn: &rusqlite::Connection) -> Result<(), rusqlite::Error> {
         let _ = conn.execute("DROP TABLE chunk", [])?;
         Ok(())
     }
 
-    fn create(conn: &Connection) -> Result<(), rusqlite::Error> {
+    fn create(conn: &rusqlite::Connection) -> Result<(), rusqlite::Error> {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS chunk (
-                id               INTEGER PRIMARY KEY ,
+                id               INTEGER PRIMARY KEY,
                 chunk_blob_id    TEXT NOT NULL,
                 chunk_digest     TEXT,
                 chunk_compressed_size  INT,
@@ -207,32 +210,38 @@ impl Table for ChunkTable {
         Ok(())
     }
 
-    fn insert(conn: &Connection, chunk_table: &ChunkTable) -> Result<(), rusqlite::Error> {
+    fn insert(conn: &rusqlite::Connection, chunk_table: &Self) -> Result<(), rusqlite::Error> {
         conn.execute(
-            "INSERT INTO chunk(chunk_blob_id,chunk_digest,chunk_compressed_size,
-                chunk_uncompressed_size,chunk_compressed_offset,chunk_uncompressed_offset)
+            "INSERT INTO chunk(
+                chunk_blob_id,
+                chunk_digest,
+                chunk_compressed_size,
+                chunk_uncompressed_size,
+                chunk_compressed_offset,
+                chunk_uncompressed_offset
+            )
             VALUES (?1, ?2, ?3, ?4, ?5, ?6);
             ",
-            params![
+            rusqlite::params![
                 chunk_table.chunk_blob_id,
                 chunk_table.chunk_digest,
                 chunk_table.chunk_compressed_size,
                 chunk_table.chunk_uncompressed_size,
                 chunk_table.chunk_compressed_offset,
-                chunk_table.chunk_uncompressed_offset
+                chunk_table.chunk_uncompressed_offset,
             ],
         )?;
 
         Ok(())
     }
 
-    fn list(conn: &Connection) -> Result<Vec<ChunkTable>, rusqlite::Error> {
+    fn list(conn: &rusqlite::Connection) -> Result<Vec<Self>, rusqlite::Error> {
         let mut stmt: rusqlite::Statement<'_> = conn.prepare(
-            "SELECT id, chunk_blob_id, chunk_digest,chunk_compressed_size,
-        chunk_uncompressed_size, chunk_compressed_offset, chunk_uncompressed_offset from chunk",
+            "SELECT id, chunk_blob_id, chunk_digest, chunk_compressed_size,
+            chunk_uncompressed_size, chunk_compressed_offset, chunk_uncompressed_offset from chunk",
         )?;
         let chunk_iterator = stmt.query_map([], |row| {
-            Ok(ChunkTable {
+            Ok(Self {
                 chunk_blob_id: row.get(1)?,
                 chunk_digest: row.get(2)?,
                 chunk_compressed_size: row.get(3)?,
@@ -256,17 +265,17 @@ pub struct BlobTable {
     blob_uncompressed_size: u64,
 }
 
-impl Table for BlobTable {
-    fn clear(conn: &Connection) -> Result<(), rusqlite::Error> {
+impl Table<rusqlite::Connection, rusqlite::Error> for BlobTable {
+    fn clear(conn: &rusqlite::Connection) -> Result<(), rusqlite::Error> {
         let _ = conn.execute("DROP TABLE blob", [])?;
         Ok(())
     }
 
-    fn create(conn: &Connection) -> Result<(), rusqlite::Error> {
+    fn create(conn: &rusqlite::Connection) -> Result<(), rusqlite::Error> {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS blob (
-                id                      INTEGER PRIMARY KEY ,
-                blob_id                 TEXT NOT NULL ,
+                id                      INTEGER PRIMARY KEY,
+                blob_id                 TEXT NOT NULL,
                 blob_compressed_size    INT,
                 blob_uncompressed_size  INT
             )",
@@ -275,7 +284,7 @@ impl Table for BlobTable {
         Ok(())
     }
 
-    fn insert(conn: &Connection, blob_table: &BlobTable) -> Result<(), rusqlite::Error> {
+    fn insert(conn: &rusqlite::Connection, blob_table: &Self) -> Result<(), rusqlite::Error> {
         conn.execute(
             "INSERT INTO blob (blob_id, blob_compressed_size, blob_uncompressed_size)
             SELECT ?1 , ?2, ?3
@@ -283,10 +292,9 @@ impl Table for BlobTable {
                 SELECT blob_id
                 FROM blob
                 WHERE blob_id = ?1
-            ) limit 1
-            ;
+            ) limit 1;
             ",
-            params![
+            rusqlite::params![
                 blob_table.blob_id,
                 blob_table.blob_compressed_size,
                 blob_table.blob_uncompressed_size
@@ -296,11 +304,11 @@ impl Table for BlobTable {
         Ok(())
     }
 
-    fn list(conn: &Connection) -> Result<Vec<BlobTable>, rusqlite::Error> {
+    fn list(conn: &rusqlite::Connection) -> Result<Vec<Self>, rusqlite::Error> {
         let mut stmt =
             conn.prepare("SELECT blob_id, blob_compressed_size, blob_uncompressed_size from blob")?;
         let blob_iterator = stmt.query_map([], |row| {
-            Ok(BlobTable {
+            Ok(Self {
                 blob_id: row.get(0)?,
                 blob_compressed_size: row.get(1)?,
                 blob_uncompressed_size: row.get(2)?,
