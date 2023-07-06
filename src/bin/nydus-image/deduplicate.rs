@@ -101,7 +101,8 @@ pub struct Deduplicate<D: Database + Send + Sync> {
 impl Deduplicate<SqliteDatabase> {
     pub fn new(bootstrap_path: &Path, config: Arc<ConfigV2>, db_path: &str) -> anyhow::Result<Self> {
         let (sb, _) = RafsSuper::load_from_file(bootstrap_path, config, false)?;
-        let db = SqliteDatabase::new(db_path)?;
+        let db = SqliteDatabase::new(db_path.strip_prefix('/').unwrap_or(db_path))?;
+        debug!("db_path: {:?}", db_path.strip_prefix('/').unwrap_or(db_path));
         Ok(Self { sb, db })
     }
 

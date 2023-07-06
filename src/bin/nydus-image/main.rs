@@ -367,16 +367,8 @@ fn prepare_cmd_args(bti_string: &'static str) -> App {
                     .arg(
                         Arg::new("database-path")
                             .long("database-path")
-                            .help("File path of metadata database, like: 'sqlite:///path/to/metadata.db'")
-                            .default_value("sqlite://./metadata.db")
-                            .required(false),
-                    )
-                    .arg(
-                        Arg::new("database-type")
-                            .long("database-type")
-                            .help("The type of metadata database, currently supported is Sqlite.")
-                            .default_value("sqlite")
-                            .value_parser(["sqlite"])
+                            .help("File path of metadata database, like: 'sqlite:///path/to/database.db'")
+                            .default_value("sqlite:///metadata.db")
                             .required(false),
                     )
                     .arg(
@@ -1103,27 +1095,32 @@ impl Command {
         let bootstrap_path = Self::get_bootstrap(matches)?;
         let config = Self::get_configuration(matches)?;
         let db_path = matches.get_one::<String>("database-path").unwrap();
-        let db_type = matches.get_one::<String>("database-type").unwrap();
         debug!("db_path: {}", db_path);
-        debug!("db_type: {}", db_type);
         // For backward compatibility with v2.1.
         config
             .internal
             .set_blob_accessible(matches.get_one::<String>("bootstrap").is_none());
 
-        let blobs: Vec<Arc<nydus_storage::device::BlobInfo>> = match db_type.as_str() {
+        let db_type: Vec<&str> = db_path.split("://").collect();
+
+        if db_type.is_empty() {
+            return Err(anyhow!("Invalid or unsupported database path. Please provide a correct database path, such as sqlite:///path/to/database.db"));
+        }
+
+        let blobs: Vec<Arc<nydus_storage::device::BlobInfo>> = match db_type[0] {
             "sqlite" => {
-                let mut deduplicate =
-                    Deduplicate::<SqliteDatabase>::new(bootstrap_path, config, db_path)?;
+                let mut deduplicate: Deduplicate<SqliteDatabase> =
+                    Deduplicate::<SqliteDatabase>::new(bootstrap_path, config, db_type[1])?;
                 deduplicate
                     .save_metadata(Some(&db_path))
                     .with_context(|| format!("failed to check bootstrap {:?}.", bootstrap_path))?
             }
             _ => {
-                return Err(anyhow!("Unsupported database type."));
+                return Err(anyhow!("Unsupported database type: {}. Please provide a correct database type, such as sqlite.", db_type[0]));
             }
         };
         info!("RAFS filesystem metadata is saved:");
+
         let mut blob_ids = Vec::new();
         for (idx, blob) in blobs.iter().enumerate() {
             info!(
