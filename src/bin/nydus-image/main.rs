@@ -367,8 +367,8 @@ fn prepare_cmd_args(bti_string: &'static str) -> App {
                     .arg(
                         Arg::new("database-path")
                             .long("database-path")
-                            .help("File path of metadata database")
-                            .default_value("./metadata.db")
+                            .help("File path of metadata database, like: 'sqlite:///path/to/metadata.db'")
+                            .default_value("sqlite://./metadata.db")
                             .required(false),
                     )
                     .arg(
@@ -376,6 +376,7 @@ fn prepare_cmd_args(bti_string: &'static str) -> App {
                             .long("database-type")
                             .help("The type of metadata database, currently supported is Sqlite.")
                             .default_value("sqlite")
+                            .value_parser(["sqlite"])
                             .required(false),
                     )
                     .arg(
