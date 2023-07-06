@@ -8,7 +8,7 @@ use nydus_api::ConfigV2;
 use nydus_builder::Tree;
 use nydus_rafs::metadata::RafsSuper;
 use nydus_storage::device::BlobInfo;
-use rusqlite::Connection;
+use rusqlite::{params, Connection};
 use std::error::Error;
 use std::fs;
 use std::path::Path;
@@ -84,12 +84,12 @@ impl Database for SqliteDatabase {
 
     fn get_chunks(&self) -> Result<Vec<ChunkTable>, ()> {
         let conn = self.conn.lock().unwrap();
-        ChunkTable::list(&conn).map_err(|_| ())
+        ChunkTable::list_all(&conn).map_err(|_| ())
     }
 
     fn get_blobs(&self) -> Result<Vec<BlobTable>, ()> {
         let conn = self.conn.lock().unwrap();
-        BlobTable::list(&conn).map_err(|_| ())
+        BlobTable::list_all(&conn).map_err(|_| ())
     }
 }
 
@@ -174,8 +174,11 @@ where
     /// insert data.
     fn insert(conn: &Conn, table: &Self) -> Result<(), Err>;
 
-    /// select data.
-    fn list(conn: &Conn) -> Result<Vec<Self>, Err>;
+    /// select all data.
+    fn list_all(conn: &Conn) -> Result<Vec<Self>, Err>;
+
+    /// select data with offset and limit.
+    fn list_paged(conn: &Conn, offset: i64, limit: i64) -> Result<Vec<Self>, Err>;
 }
 
 #[derive(Debug)]
@@ -235,12 +238,35 @@ impl Table<rusqlite::Connection, rusqlite::Error> for ChunkTable {
         Ok(())
     }
 
-    fn list(conn: &rusqlite::Connection) -> Result<Vec<Self>, rusqlite::Error> {
+    fn list_all(conn: &rusqlite::Connection) -> Result<Vec<Self>, rusqlite::Error> {
+        let mut offset = 0;
+        let limit: i64 = 100; // 每页的行数
+        let mut all_chunks = Vec::new();
+
+        loop {
+            let chunks = Self::list_paged(conn, offset, limit)?;
+            if chunks.is_empty() {
+                break;
+            }
+
+            all_chunks.extend(chunks);
+            offset += limit;
+        }
+
+        Ok(all_chunks)
+    }
+
+    fn list_paged(
+        conn: &rusqlite::Connection,
+        offset: i64,
+        limit: i64,
+    ) -> Result<Vec<Self>, rusqlite::Error> {
         let mut stmt: rusqlite::Statement<'_> = conn.prepare(
             "SELECT id, chunk_blob_id, chunk_digest, chunk_compressed_size,
-            chunk_uncompressed_size, chunk_compressed_offset, chunk_uncompressed_offset from chunk",
+            chunk_uncompressed_size, chunk_compressed_offset, chunk_uncompressed_offset from chunk
+            ORDER BY id LIMIT ?1 OFFSET ?2",
         )?;
-        let chunk_iterator = stmt.query_map([], |row| {
+        let chunk_iterator = stmt.query_map(params![limit, offset], |row| {
             Ok(Self {
                 chunk_blob_id: row.get(1)?,
                 chunk_digest: row.get(2)?,
@@ -304,10 +330,32 @@ impl Table<rusqlite::Connection, rusqlite::Error> for BlobTable {
         Ok(())
     }
 
-    fn list(conn: &rusqlite::Connection) -> Result<Vec<Self>, rusqlite::Error> {
+    fn list_all(conn: &rusqlite::Connection) -> Result<Vec<Self>, rusqlite::Error> {
+        let mut offset = 0;
+        let limit = 100; // Set the limit per page according to your requirement
+        let mut all_blobs = Vec::new();
+
+        loop {
+            let blobs = Self::list_paged(conn, offset, limit)?;
+            if blobs.is_empty() {
+                break;
+            }
+
+            all_blobs.extend(blobs);
+            offset += limit;
+        }
+
+        Ok(all_blobs)
+    }
+
+    fn list_paged(
+        conn: &rusqlite::Connection,
+        offset: i64,
+        limit: i64,
+    ) -> Result<Vec<Self>, rusqlite::Error> {
         let mut stmt =
-            conn.prepare("SELECT blob_id, blob_compressed_size, blob_uncompressed_size from blob")?;
-        let blob_iterator = stmt.query_map([], |row| {
+            conn.prepare("SELECT blob_id, blob_compressed_size, blob_uncompressed_size from blob LIMIT ?1 OFFSET ?2")?;
+        let blob_iterator = stmt.query_map(params![limit, offset], |row| {
             Ok(Self {
                 blob_id: row.get(0)?,
                 blob_compressed_size: row.get(1)?,
@@ -349,7 +397,7 @@ mod tests {
 
         BlobTable::insert(&conn, &blob)?;
 
-        let blobs = BlobTable::list(&conn)?;
+        let blobs = BlobTable::list_all(&conn)?;
         assert_eq!(blobs.len(), 1);
         assert_eq!(blobs[0].blob_id, blob.blob_id);
         assert_eq!(blobs[0].blob_compressed_size, blob.blob_compressed_size);
@@ -373,7 +421,7 @@ mod tests {
 
         ChunkTable::insert(&conn, &chunk)?;
 
-        let chunks = ChunkTable::list(&conn)?;
+        let chunks = ChunkTable::list_all(&conn)?;
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0].chunk_blob_id, chunk.chunk_blob_id);
         assert_eq!(chunks[0].chunk_digest, chunk.chunk_digest);
@@ -393,4 +441,57 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_blob_table_paged() -> Result<(), rusqlite::Error> {
+        let conn = setup_db()?;
+
+        for i in 0..200 {
+            let blob = BlobTable {
+                blob_id: format!("BLOB{}", i),
+                blob_compressed_size: i as u64,
+                blob_uncompressed_size: (i * 2) as u64,
+            };
+
+            BlobTable::insert(&conn, &blob)?;
+        }
+
+        let blobs = BlobTable::list_paged(&conn, 100, 100)?;
+        assert_eq!(blobs.len(), 100);
+        assert_eq!(blobs[0].blob_id, "BLOB100");
+        assert_eq!(blobs[0].blob_compressed_size, 100);
+        assert_eq!(blobs[0].blob_uncompressed_size, 200);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_chunk_table_paged() -> Result<(), rusqlite::Error> {
+        let conn = setup_db()?;
+
+        for i in 0..200 {
+            let chunk = ChunkTable {
+                chunk_blob_id: format!("BLOB{}", i),
+                chunk_digest: format!("DIGEST{}", i),
+                chunk_compressed_size: i as u32,
+                chunk_uncompressed_size: (i * 2) as u32,
+                chunk_compressed_offset: (i * 3) as u64,
+                chunk_uncompressed_offset: (i * 4) as u64,
+            };
+
+            ChunkTable::insert(&conn, &chunk)?;
+        }
+
+        let chunks = ChunkTable::list_paged(&conn, 100, 100)?;
+        assert_eq!(chunks.len(), 100);
+        assert_eq!(chunks[0].chunk_blob_id, "BLOB100");
+        assert_eq!(chunks[0].chunk_digest, "DIGEST100");
+        assert_eq!(chunks[0].chunk_compressed_size, 100);
+        assert_eq!(chunks[0].chunk_uncompressed_size, 200);
+        assert_eq!(chunks[0].chunk_compressed_offset, 300);
+        assert_eq!(chunks[0].chunk_uncompressed_offset, 400);
+
+        Ok(())
+}
+
 }
