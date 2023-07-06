@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-//! Deduplicate for Chunk
+//! Deduplicate for Chunk.
 
 use anyhow::{Context, Result};
 use nydus_api::ConfigV2;
@@ -40,19 +40,19 @@ pub struct SqliteDatabase {
 
 impl SqliteDatabase {
     pub fn new(database_path: &str) -> Result<Self, rusqlite::Error> {
-        // Delete the database file if it exists
+        // Delete the database file if it exists.
         if let Ok(metadata) = fs::metadata(database_path) {
             if metadata.is_file() {
                 if let Err(err) = fs::remove_file(database_path) {
                     warn!(
-                        "Warning: Unable to delete existing database file: {:?}",
+                        "Warning: Unable to delete existing database file: {:?}.",
                         err
                     );
                 }
             }
         }
 
-        // Attempt to open a new SQLite connection
+        // Attempt to open a new SQLite connection.
         let conn = Connection::open(database_path)?;
 
         Ok(Self {
@@ -99,41 +99,41 @@ pub struct Deduplicate<D: Database + Send + Sync> {
 }
 
 impl Deduplicate<SqliteDatabase> {
-
     pub fn new(bootstrap_path: &Path, config: Arc<ConfigV2>, db_path: &str) -> anyhow::Result<Self> {
         let (sb, _) = RafsSuper::load_from_file(bootstrap_path, config, false)?;
         let db = SqliteDatabase::new(db_path)?;
         Ok(Self { sb, db })
     }
 
-    /// Save metadata to the database: chunk and blob info
+    /// Save metadata to the database: chunk and blob info.
     pub fn save_metadata(&mut self, _mode: Option<&str>) -> anyhow::Result<Vec<Arc<BlobInfo>>> {
         let tree = Tree::from_bootstrap(&self.sb, &mut ())
-            .context("Failed to load bootstrap for deduplication")?;
+            .context("Failed to load bootstrap for deduplication.")?;
 
-        // Create the blob table and chunk table
-        self.db.create_chunk().map_err(|e| anyhow!("Failed to create chunk: {:?}", e))?;
-        self.db.create_blob().map_err(|e| anyhow!("Failed to create blob: {:?}", e))?;
+        // Create the blob table and chunk table.
+        self.db.create_chunk().map_err(|e| anyhow!("Failed to create chunk: {:?}.", e))?;
+        self.db.create_blob().map_err(|e| anyhow!("Failed to create blob: {:?}.", e))?;
 
-        // Save blob info to the blob table
+        // Save blob info to the blob table.
         let blob_infos = self.sb.superblock.get_blob_infos();
         for blob in &blob_infos {
             self.db
                 .insert_blob(&BlobTable {
                     blob_id: blob.blob_id().to_string(),
-                    blob_size: blob.uncompressed_size(),
+                    blob_compressed_size: blob.compressed_size(),
+                    blob_uncompressed_size: blob.uncompressed_size(),
                 })
-                .map_err(|e| anyhow!("Failed to insert blob: {:?}", e))?;
+                .map_err(|e| anyhow!("Failed to insert blob: {:?}.", e))?;
         }
 
-        // Save chunk info to the chunk table
+        // Save chunk info to the chunk table.
         let pre = &mut |t: &Tree| -> anyhow::Result<()> {
             let node = t.lock_node();
             for chunk in &node.chunks {
                 let index: u32 = chunk.inner.blob_index();
-                // Get the blob ID
+                // Get the blob ID.
                 let chunk_blob_id = blob_infos[index as usize].blob_id();
-                // Insert the chunk into the chunk table
+                // Insert the chunk into the chunk table.
                 self.db
                     .insert_chunk(&ChunkTable {
                         chunk_blob_id,
@@ -143,7 +143,7 @@ impl Deduplicate<SqliteDatabase> {
                         chunk_compressed_offset: chunk.inner.compressed_offset(),
                         chunk_uncompressed_offset: chunk.inner.uncompressed_offset(),
                     })
-                    .map_err(|e| anyhow!("Failed to insert chunk: {:?}", e))?;
+                    .map_err(|e| anyhow!("Failed to insert chunk: {:?}.", e))?;
             }
             Ok(())
         };
@@ -244,7 +244,8 @@ impl Table for ChunkTable {
 #[derive(Debug)]
 pub struct BlobTable {
     blob_id: String,
-    blob_size: u64,
+    blob_compressed_size: u64,
+    blob_uncompressed_size: u64,
 }
 
 impl Table for BlobTable {
@@ -256,9 +257,10 @@ impl Table for BlobTable {
     fn create(conn: &Connection) -> Result<(), rusqlite::Error> {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS blob (
-                id                  INTEGER PRIMARY KEY ,
-                blob_id             TEXT NOT NULL ,
-                blob_size           INT
+                id                      INTEGER PRIMARY KEY ,
+                blob_id                 TEXT NOT NULL ,
+                blob_compressed_size    INT,
+                blob_uncompressed_size  INT
             )",
             [],
         )?;
@@ -267,8 +269,8 @@ impl Table for BlobTable {
 
     fn insert(conn: &Connection, blob_table: &BlobTable) -> Result<(), rusqlite::Error> {
         conn.execute(
-            "INSERT INTO blob (blob_id, blob_size)
-            SELECT ?1 , ?2
+            "INSERT INTO blob (blob_id, blob_compressed_size, blob_uncompressed_size)
+            SELECT ?1 , ?2, ?3
             WHERE NOT EXISTS (
                 SELECT blob_id
                 FROM blob
@@ -276,18 +278,19 @@ impl Table for BlobTable {
             ) limit 1
             ;
             ",
-            params![blob_table.blob_id, blob_table.blob_size],
+            params![blob_table.blob_id, blob_table.blob_compressed_size, blob_table.blob_uncompressed_size],
         )?;
 
         Ok(())
     }
 
     fn list(conn: &Connection) -> Result<Vec<BlobTable>, rusqlite::Error> {
-        let mut stmt = conn.prepare("SELECT blob_id,blob_size from blob")?;
+        let mut stmt = conn.prepare("SELECT blob_id, blob_compressed_size, blob_uncompressed_size from blob")?;
         let blob_iterator = stmt.query_map([], |row| {
             Ok(BlobTable {
                 blob_id: row.get(0)?,
-                blob_size: row.get(1)?,
+                blob_compressed_size: row.get(1)?,
+                blob_uncompressed_size: row.get(2)?,
             })
         })?;
         let mut blobs = Vec::new();
@@ -303,7 +306,7 @@ mod tests {
     use super::*;
     use rusqlite::{Connection, Result};
 
-    // Setting up an in-memory SQLite database for testing
+    // Setting up an in-memory SQLite database for testing.
     fn setup_db() -> Result<Connection> {
         let conn = Connection::open_in_memory()?;
 
@@ -319,7 +322,8 @@ mod tests {
 
         let blob = BlobTable {
             blob_id: "BLOB123".to_string(),
-            blob_size: "1024".parse::<u64>().unwrap(),
+            blob_compressed_size: "1024".parse::<u64>().unwrap(),
+            blob_uncompressed_size: "2048".parse::<u64>().unwrap(),
         };
 
         BlobTable::insert(&conn, &blob)?;
@@ -327,7 +331,8 @@ mod tests {
         let blobs = BlobTable::list(&conn)?;
         assert_eq!(blobs.len(), 1);
         assert_eq!(blobs[0].blob_id, blob.blob_id);
-        assert_eq!(blobs[0].blob_size, blob.blob_size);
+        assert_eq!(blobs[0].blob_compressed_size, blob.blob_compressed_size);
+        assert_eq!(blobs[0].blob_uncompressed_size, blob.blob_uncompressed_size);
 
         Ok(())
     }

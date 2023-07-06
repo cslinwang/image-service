@@ -375,7 +375,7 @@ fn prepare_cmd_args(bti_string: &'static str) -> App {
                         Arg::new("database-type")
                             .long("database-type")
                             .help("The type of metadata database, currently supported is Sqlite.")
-                            .default_value("Sqlite.")
+                            .default_value("sqlite")
                             .required(false),
                     )
                     .arg(
@@ -1105,29 +1105,28 @@ impl Command {
         let db_type = matches.get_one::<String>("database-type").unwrap();
         debug!("db_path: {}", db_path);
         debug!("db_type: {}", db_type);
-        // For backward compatibility with v2.1
+        // For backward compatibility with v2.1.
         config
             .internal
             .set_blob_accessible(matches.get_one::<String>("bootstrap").is_none());
 
         let blobs: Vec<Arc<nydus_storage::device::BlobInfo>> = match db_type.as_str() {
-            "Sqlite" => {
+            "sqlite" => {
                 let mut deduplicate =
                     Deduplicate::<SqliteDatabase>::new(bootstrap_path, config, db_path)?;
                 deduplicate
                     .save_metadata(Some(&db_path))
-                    .with_context(|| format!("failed to check bootstrap {:?}", bootstrap_path))?
+                    .with_context(|| format!("failed to check bootstrap {:?}.", bootstrap_path))?
             }
-            // Add other cases for different database types if needed
             _ => {
-                return Err(anyhow!("Unsupported database type"));
+                return Err(anyhow!("Unsupported database type."));
             }
         };
         info!("RAFS filesystem metadata is saved:");
         let mut blob_ids = Vec::new();
         for (idx, blob) in blobs.iter().enumerate() {
             info!(
-                "\t {}: {}, compressed data size 0x{:x}, compressed file size 0x{:x}, uncompressed file size 0x{:x}, chunks: 0x{:x}, features: {}",
+                "\t {}: {}, compressed data size 0x{:x}, compressed file size 0x{:x}, uncompressed file size 0x{:x}, chunks: 0x{:x}, features: {}.",
                 idx,
                 blob.blob_id(),
                 blob.compressed_data_size(),
