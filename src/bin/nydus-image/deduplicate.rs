@@ -492,6 +492,5 @@ mod tests {
         assert_eq!(chunks[0].chunk_uncompressed_offset, 400);
 
         Ok(())
-}
-
+    }
 }
