@@ -99,10 +99,13 @@ pub struct Deduplicate<D: Database + Send + Sync> {
 }
 
 impl Deduplicate<SqliteDatabase> {
-    pub fn new(bootstrap_path: &Path, config: Arc<ConfigV2>, db_path: &str) -> anyhow::Result<Self> {
+    pub fn new(
+        bootstrap_path: &Path,
+        config: Arc<ConfigV2>,
+        db_path: &str,
+    ) -> anyhow::Result<Self> {
         let (sb, _) = RafsSuper::load_from_file(bootstrap_path, config, false)?;
         let db = SqliteDatabase::new(db_path.strip_prefix('/').unwrap_or(db_path))?;
-        debug!("db_path: {:?}", db_path.strip_prefix('/').unwrap_or(db_path));
         Ok(Self { sb, db })
     }
 
@@ -112,8 +115,12 @@ impl Deduplicate<SqliteDatabase> {
             .context("Failed to load bootstrap for deduplication.")?;
 
         // Create the blob table and chunk table.
-        self.db.create_chunk().map_err(|e| anyhow!("Failed to create chunk: {:?}.", e))?;
-        self.db.create_blob().map_err(|e| anyhow!("Failed to create blob: {:?}.", e))?;
+        self.db
+            .create_chunk()
+            .map_err(|e| anyhow!("Failed to create chunk: {:?}.", e))?;
+        self.db
+            .create_blob()
+            .map_err(|e| anyhow!("Failed to create blob: {:?}.", e))?;
 
         // Save blob info to the blob table.
         let blob_infos = self.sb.superblock.get_blob_infos();
@@ -279,14 +286,19 @@ impl Table for BlobTable {
             ) limit 1
             ;
             ",
-            params![blob_table.blob_id, blob_table.blob_compressed_size, blob_table.blob_uncompressed_size],
+            params![
+                blob_table.blob_id,
+                blob_table.blob_compressed_size,
+                blob_table.blob_uncompressed_size
+            ],
         )?;
 
         Ok(())
     }
 
     fn list(conn: &Connection) -> Result<Vec<BlobTable>, rusqlite::Error> {
-        let mut stmt = conn.prepare("SELECT blob_id, blob_compressed_size, blob_uncompressed_size from blob")?;
+        let mut stmt =
+            conn.prepare("SELECT blob_id, blob_compressed_size, blob_uncompressed_size from blob")?;
         let blob_iterator = stmt.query_map([], |row| {
             Ok(BlobTable {
                 blob_id: row.get(0)?,
