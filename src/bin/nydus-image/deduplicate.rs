@@ -34,7 +34,6 @@ pub trait Database {
     fn get_blobs(&self) -> Result<Vec<BlobTable>>;
 }
 
-
 pub struct SqliteDatabase {
     conn: Arc<Mutex<Connection>>,
 }
@@ -109,11 +108,7 @@ pub struct Deduplicate<D: Database + Send + Sync> {
 }
 
 impl Deduplicate<SqliteDatabase> {
-    pub fn new(
-        bootstrap_path: &Path,
-        config: Arc<ConfigV2>,
-        db_url: &str,
-    ) -> anyhow::Result<Self> {
+    pub fn new(bootstrap_path: &Path, config: Arc<ConfigV2>, db_url: &str) -> anyhow::Result<Self> {
         let (sb, _) = RafsSuper::load_from_file(bootstrap_path, config, false)?;
 
         // Create a new SQLite database.
@@ -150,7 +145,7 @@ impl Deduplicate<SqliteDatabase> {
                 })
                 .context("Failed to insert blob")?;
         }
-        
+
         // Save chunk info to the chunk table.
         let pre = &mut |t: &Tree| -> Result<()> {
             let node = t.lock_node();
@@ -257,7 +252,7 @@ impl Table<rusqlite::Connection, rusqlite::Error> for ChunkTable {
 
     fn list_all(conn: &rusqlite::Connection) -> Result<Vec<Self>, rusqlite::Error> {
         let mut offset = 0;
-        let limit: i64 = 100; 
+        let limit: i64 = 100;
         let mut all_chunks = Vec::new();
 
         loop {

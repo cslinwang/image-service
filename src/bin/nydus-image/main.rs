@@ -1149,8 +1149,7 @@ impl Command {
             "sqlite" => {
                 let mut deduplicate: Deduplicate<SqliteDatabase> =
                     Deduplicate::<SqliteDatabase>::new(bootstrap_path, config, db_strs[1])?;
-                deduplicate
-                    .save_metadata()?
+                deduplicate.save_metadata()?
             }
             _ => {
                 bail!("Unsupported database type: {}, please use a valid database URI, such as 'sqlite:///path/to/database.db'.", db_strs[0])
