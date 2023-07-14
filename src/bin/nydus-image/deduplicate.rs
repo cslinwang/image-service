@@ -16,23 +16,24 @@ use std::sync::{Arc, Mutex};
 
 pub trait Database {
     /// Creates a new chunk in the database.
-    fn create_chunk_table(&self) -> Result<(), ()>;
+    fn create_chunk_table(&self) -> Result<()>;
 
     /// Creates a new blob in the database.
-    fn create_blob_table(&self) -> Result<(), ()>;
+    fn create_blob_table(&self) -> Result<()>;
 
     /// Inserts chunk information into the database.
-    fn insert_chunk(&self, chunk_info: &ChunkTable) -> Result<(), ()>;
+    fn insert_chunk(&self, chunk_info: &ChunkTable) -> Result<()>;
 
     /// Inserts blob information into the database.
-    fn insert_blob(&self, blob_info: &BlobTable) -> Result<(), ()>;
+    fn insert_blob(&self, blob_info: &BlobTable) -> Result<()>;
 
     /// Retrieves all chunk information from the database.
-    fn get_chunks(&self) -> Result<Vec<ChunkTable>, ()>;
+    fn get_chunks(&self) -> Result<Vec<ChunkTable>>;
 
     /// Retrieves all blob information from the database.
-    fn get_blobs(&self) -> Result<Vec<BlobTable>, ()>;
+    fn get_blobs(&self) -> Result<Vec<BlobTable>>;
 }
+
 
 pub struct SqliteDatabase {
     conn: Arc<Mutex<Connection>>,
@@ -71,34 +72,34 @@ impl SqliteDatabase {
 }
 
 impl Database for SqliteDatabase {
-    fn create_chunk_table(&self) -> Result<(), ()> {
+    fn create_chunk_table(&self) -> Result<()> {
         let conn = self.conn.lock().unwrap();
-        ChunkTable::create(&conn).map_err(|_| ())
+        ChunkTable::create(&conn).context("Failed to create chunk table")
     }
 
-    fn create_blob_table(&self) -> Result<(), ()> {
+    fn create_blob_table(&self) -> Result<()> {
         let conn = self.conn.lock().unwrap();
-        BlobTable::create(&conn).map_err(|_| ())
+        BlobTable::create(&conn).context("Failed to create blob table")
     }
 
-    fn insert_chunk(&self, chunk: &ChunkTable) -> Result<(), ()> {
+    fn insert_chunk(&self, chunk: &ChunkTable) -> Result<()> {
         let conn = self.conn.lock().unwrap();
-        ChunkTable::insert(&conn, chunk).map_err(|_| ())
+        ChunkTable::insert(&conn, chunk).context("Failed to insert chunk")
     }
 
-    fn insert_blob(&self, blob: &BlobTable) -> Result<(), ()> {
+    fn insert_blob(&self, blob: &BlobTable) -> Result<()> {
         let conn = self.conn.lock().unwrap();
-        BlobTable::insert(&conn, blob).map_err(|_| ())
+        BlobTable::insert(&conn, blob).context("Failed to insert blob")
     }
 
-    fn get_chunks(&self) -> Result<Vec<ChunkTable>, ()> {
+    fn get_chunks(&self) -> Result<Vec<ChunkTable>> {
         let conn = self.conn.lock().unwrap();
-        ChunkTable::list_all(&conn).map_err(|_| ())
+        ChunkTable::list_all(&conn).context("Failed to get chunks")
     }
 
-    fn get_blobs(&self) -> Result<Vec<BlobTable>, ()> {
+    fn get_blobs(&self) -> Result<Vec<BlobTable>> {
         let conn = self.conn.lock().unwrap();
-        BlobTable::list_all(&conn).map_err(|_| ())
+        BlobTable::list_all(&conn).context("Failed to get blobs")
     }
 }
 
@@ -126,17 +127,17 @@ impl Deduplicate<SqliteDatabase> {
     }
 
     /// Save metadata to the database: chunk and blob info.
-    pub fn save_metadata(&mut self, _mode: Option<&str>) -> anyhow::Result<Vec<Arc<BlobInfo>>> {
+    pub fn save_metadata(&mut self) -> anyhow::Result<Vec<Arc<BlobInfo>>> {
         let tree = Tree::from_bootstrap(&self.sb, &mut ())
             .context("Failed to load bootstrap for deduplication.")?;
 
         // Create the blob table and chunk table.
         self.db
             .create_chunk_table()
-            .map_err(|e| anyhow!("Failed to create chunk: {:?}.", e))?;
+            .context("Failed to create chunk.")?;
         self.db
             .create_blob_table()
-            .map_err(|e| anyhow!("Failed to create blob: {:?}.", e))?;
+            .context("Failed to create blob.")?;
 
         // Save blob info to the blob table.
         let blob_infos = self.sb.superblock.get_blob_infos();
@@ -147,14 +148,14 @@ impl Deduplicate<SqliteDatabase> {
                     blob_compressed_size: blob.compressed_size(),
                     blob_uncompressed_size: blob.uncompressed_size(),
                 })
-                .map_err(|e| anyhow!("Failed to insert blob: {:?}.", e))?;
+                .context("Failed to insert blob")?;
         }
-
+        
         // Save chunk info to the chunk table.
-        let pre = &mut |t: &Tree| -> anyhow::Result<()> {
+        let pre = &mut |t: &Tree| -> Result<()> {
             let node = t.lock_node();
             for chunk in &node.chunks {
-                let index: u32 = chunk.inner.blob_index();
+                let index = chunk.inner.blob_index();
                 // Get the blob ID.
                 let chunk_blob_id = blob_infos[index as usize].blob_id();
                 // Insert the chunk into the chunk table.
@@ -167,7 +168,7 @@ impl Deduplicate<SqliteDatabase> {
                         chunk_compressed_offset: chunk.inner.compressed_offset(),
                         chunk_uncompressed_offset: chunk.inner.uncompressed_offset(),
                     })
-                    .map_err(|e| anyhow!("Failed to insert chunk: {:?}.", e))?;
+                    .context("Failed to insert chunk")?;
             }
             Ok(())
         };
@@ -256,7 +257,7 @@ impl Table<rusqlite::Connection, rusqlite::Error> for ChunkTable {
 
     fn list_all(conn: &rusqlite::Connection) -> Result<Vec<Self>, rusqlite::Error> {
         let mut offset = 0;
-        let limit: i64 = 100; // 每页的行数
+        let limit: i64 = 100; 
         let mut all_chunks = Vec::new();
 
         loop {

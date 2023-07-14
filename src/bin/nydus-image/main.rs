@@ -34,7 +34,7 @@ use nydus_builder::{
 use nydus_rafs::metadata::{RafsSuper, RafsSuperConfig, RafsVersion};
 use nydus_storage::backend::localfs::LocalFs;
 use nydus_storage::backend::BlobBackend;
-use nydus_storage::device::BlobFeatures;
+use nydus_storage::device::{BlobFeatures, BlobInfo};
 use nydus_storage::factory::BlobFactory;
 use nydus_storage::meta::{format_blob_features, BatchContextGenerator};
 use nydus_storage::{RAFS_DEFAULT_CHUNK_SIZE, RAFS_MAX_CHUNK_SIZE};
@@ -375,7 +375,7 @@ fn prepare_cmd_args(bti_string: &'static str) -> App {
                     .arg(
                         Arg::new("database")
                             .long("database")
-                            .help("Url of metadata database, like: 'sqlite:///path/to/database.db'")
+                            .help("Database connection URI for assisting chunk dict generation, e.g. sqlite:///path/to/database.db.")
                             .default_value("sqlite:///sqlite_memory_model")
                             .required(false),
                     )
@@ -1140,22 +1140,20 @@ impl Command {
             .internal
             .set_blob_accessible(matches.get_one::<String>("bootstrap").is_none());
 
-        let db_type: Vec<&str> = db_url.split("://").collect();
-
-        if db_type.is_empty() || !db_type[1].starts_with('/') {
-            return Err(anyhow!("Invalid or unsupported database path. Please provide a correct database path (absolute path), such as sqlite:///path/to/database.db"));
+        let db_strs: Vec<&str> = db_url.split("://").collect();
+        if db_strs.len() != 2 || !db_strs[1].starts_with('/') {
+            bail!("Invalid database URL")
         }
 
-        let blobs: Vec<Arc<nydus_storage::device::BlobInfo>> = match db_type[0] {
+        let blobs: Vec<Arc<BlobInfo>> = match db_strs[0] {
             "sqlite" => {
                 let mut deduplicate: Deduplicate<SqliteDatabase> =
-                    Deduplicate::<SqliteDatabase>::new(bootstrap_path, config, db_type[1])?;
+                    Deduplicate::<SqliteDatabase>::new(bootstrap_path, config, db_strs[1])?;
                 deduplicate
-                    .save_metadata(Some(&db_url))
-                    .with_context(|| format!("failed to check bootstrap {:?}.", bootstrap_path))?
+                    .save_metadata()?
             }
             _ => {
-                return Err(anyhow!("Unsupported database type: {}. Please provide a correct database type, such as sqlite.", db_type[0]));
+                bail!("Unsupported database type: {}, please use a valid database URI, such as 'sqlite:///path/to/database.db'.", db_strs[0])
             }
         };
         info!("RAFS filesystem metadata is saved:");
