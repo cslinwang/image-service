@@ -83,7 +83,7 @@ impl SqliteDatabase {
             Ok(table) => table,
             Err(e) => {
                 println!("An error occurred when creating the ChunkTable: {}", e);
-                return Err(e.into());
+                return Err(e);
             }
         };
 
@@ -92,7 +92,7 @@ impl SqliteDatabase {
             Ok(table) => table,
             Err(e) => {
                 println!("An error occurred when creating the BlobTable: {}", e);
-                return Err(e.into());
+                return Err(e);
             }
         };
 
@@ -108,7 +108,7 @@ impl SqliteDatabase {
             Ok(table) => table,
             Err(e) => {
                 println!("An error occurred when creating the ChunkTable: {}", e);
-                return Err(e.into());
+                return Err(e);
             }
         };
         let blob_table_result = BlobTable::new_in_memory();
@@ -116,7 +116,7 @@ impl SqliteDatabase {
             Ok(table) => table,
             Err(e) => {
                 println!("An error occurred when creating the BlobTable: {}", e);
-                return Err(e.into());
+                return Err(e);
             }
         };
         Ok(Self {
@@ -128,13 +128,12 @@ impl SqliteDatabase {
 
 impl Database for SqliteDatabase {
     fn create_chunk_table(&self) -> Result<()> {
-        ChunkTable::create(&*self.chunk_table.as_ref().unwrap())
+        ChunkTable::create(self.chunk_table.as_ref().unwrap())
             .context("Failed to create chunk table")
     }
 
     fn create_blob_table(&self) -> Result<()> {
-        BlobTable::create(&*self.blob_table.as_ref().unwrap())
-            .context("Failed to create blob table")
+        BlobTable::create(self.blob_table.as_ref().unwrap()).context("Failed to create blob table")
     }
 
     fn insert_chunk(&self, chunk: &Chunk) -> Result<()> {
@@ -154,11 +153,11 @@ impl Database for SqliteDatabase {
     }
 
     fn get_chunks(&self) -> Result<Vec<Chunk>> {
-        ChunkTable::list_all(&*self.chunk_table.as_ref().unwrap()).context("Failed to get chunks")
+        ChunkTable::list_all(self.chunk_table.as_ref().unwrap()).context("Failed to get chunks")
     }
 
     fn get_blobs(&self) -> Result<Vec<Blob>> {
-        BlobTable::list_all(&*self.blob_table.as_ref().unwrap()).context("Failed to get blobs")
+        BlobTable::list_all(self.blob_table.as_ref().unwrap()).context("Failed to get blobs")
     }
 }
 
