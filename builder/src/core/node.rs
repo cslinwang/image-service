@@ -305,6 +305,14 @@ impl Node {
                 };
             }
 
+            // Get chunk by chunkdict.
+            if ctx.conversion_type != ConversionType::TarToTarfs && !ctx.chunkdict.is_empty() {
+                chunk = match self.get_chunk_by_chunkdict(ctx, chunk)? {
+                    None => continue,
+                    Some(c) => c,
+                };
+            }
+
             let (blob_index, blob_ctx) = blob_mgr.get_or_create_current_blob(ctx)?;
             let chunk_index = blob_ctx.alloc_chunk_index()?;
             chunk.set_blob_index(blob_index);
@@ -556,6 +564,27 @@ impl Node {
         });
 
         Ok(None)
+    }
+
+    fn get_chunk_by_chunkdict(
+        &mut self,
+        ctx: &BuildContext,
+        chunk: ChunkWrapper,
+    ) -> Result<Option<ChunkWrapper>> {
+        // Query the database to check if the chunk ID exists
+        if !Self::is_chunk_id_in_chunkdict(ctx, chunk.id())? {
+            // If the chunk ID is not in the database, delete it
+            trace!("Chunk ID : {} not found in chunkdict, deleting.", chunk.id());
+            return Ok(None);
+        }
+
+        Ok(Some(chunk))
+    }
+
+    fn is_chunk_id_in_chunkdict(ctx: &BuildContext, chunk_id: &RafsDigest) -> Result<bool> {
+        let chunk_id_str = chunk_id.to_string();
+        // Check if the chunk_id_str is in the chunkdict
+        Ok(ctx.chunkdict.contains(&chunk_id_str))
     }
 }
 

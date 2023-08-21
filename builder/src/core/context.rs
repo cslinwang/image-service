@@ -1182,6 +1182,9 @@ pub struct BuildContext {
 
     pub features: Features,
     pub configuration: Arc<ConfigV2>,
+
+    /// Chunkdict for chunk deduplication.
+    pub chunkdict: Vec<String>,
 }
 
 impl BuildContext {
@@ -1250,6 +1253,8 @@ impl BuildContext {
 
             features,
             configuration: Arc::new(ConfigV2::default()),
+
+            chunkdict: Vec::new(),
         }
     }
 
@@ -1267,6 +1272,10 @@ impl BuildContext {
 
     pub fn set_configuration(&mut self, config: Arc<ConfigV2>) {
         self.configuration = config;
+    }
+
+    pub fn set_chunkdict(&mut self, chunkdict: Vec<String>) {
+        self.chunkdict = chunkdict;
     }
 }
 
@@ -1299,6 +1308,8 @@ impl Default for BuildContext {
             blob_inline_meta: false,
             features: Features::new(),
             configuration: Arc::new(ConfigV2::default()),
+
+            chunkdict: Vec::new(),
         }
     }
 }
