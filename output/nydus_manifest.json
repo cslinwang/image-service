@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 2,
+  "mediaType": "application/vnd.oci.image.manifest.v1+json",
+  "config": {
+    "mediaType": "application/vnd.oci.image.config.v1+json",
+    "digest": "sha256:02699c8ff76e55374d25c40543645abc045424fc9b93f1eeeed203286cd09bba",
+    "size": 1350
+  },
+  "layers": [
+    {
+      "mediaType": "application/vnd.oci.image.layer.nydus.blob.v1",
+      "digest": "sha256:bc42123fb02008ec41ff6b9b9888a74831bc93c534cb4434faccd35d04c26df6",
+      "size": 32147139,
+      "annotations": {
+        "containerd.io/snapshot/nydus-blob": "true"
+      }
+    },
+    {
+      "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+      "digest": "sha256:481438d178281758ff8277fa361d729900a926feaa177994dd4311f3fef06972",
+      "size": 208219,
+      "annotations": {
+        "containerd.io/snapshot/nydus-bootstrap": "true",
+        "containerd.io/snapshot/nydus-fs-version": "6"
+      }
+    }
+  ],
+  "subject": {
+    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+    "digest": "sha256:ca5534a51dd04bbcebe9b23ba05f389466cf0c190f1f8f182d7eea92a9671d00",
+    "size": 424,
+    "platform": {
+      "architecture": "amd64",
+      "os": "linux"
+    }
+  }
+}

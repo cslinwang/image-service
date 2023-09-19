@@ -1,0 +1,1 @@
+{"version":"v2.2.0-293-gf3498d3b-f3498d3bb668aa08e093bf98a7728b6e43fe2a81","bootstrap":"output/nydus_bootstrap","blobs":["bc42123fb02008ec41ff6b9b9888a74831bc93c534cb4434faccd35d04c26df6"],"trace":{"consumed_time":{"load_tree_from_bootstrap":0.020739296451210976},"registered_events":{}}}

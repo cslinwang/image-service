@@ -1,0 +1,59 @@
+{
+  "created": "2023-04-25T17:30:49.231209804Z",
+  "architecture": "amd64",
+  "os": "linux",
+  "config": {
+    "Env": [
+      "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    ],
+    "Cmd": [
+      "/bin/bash"
+    ],
+    "Labels": {
+      "org.opencontainers.image.ref.name": "ubuntu",
+      "org.opencontainers.image.version": "22.04"
+    }
+  },
+  "rootfs": {
+    "type": "layers",
+    "diff_ids": [
+      "sha256:bc42123fb02008ec41ff6b9b9888a74831bc93c534cb4434faccd35d04c26df6",
+      "sha256:e9b25d5a4d4b607bf2adde759cd9afa6a6b797e64233cfb2aee1014f5baddd01"
+    ]
+  },
+  "history": [
+    {
+      "created": "2023-04-25T17:30:47.567787516Z",
+      "created_by": "/bin/sh -c #(nop)  ARG RELEASE",
+      "empty_layer": true
+    },
+    {
+      "created": "2023-04-25T17:30:47.604948598Z",
+      "created_by": "/bin/sh -c #(nop)  ARG LAUNCHPAD_BUILD_ARCH",
+      "empty_layer": true
+    },
+    {
+      "created": "2023-04-25T17:30:47.643242197Z",
+      "created_by": "/bin/sh -c #(nop)  LABEL org.opencontainers.image.ref.name=ubuntu",
+      "empty_layer": true
+    },
+    {
+      "created": "2023-04-25T17:30:47.681842743Z",
+      "created_by": "/bin/sh -c #(nop)  LABEL org.opencontainers.image.version=22.04",
+      "empty_layer": true
+    },
+    {
+      "created": "2023-04-25T17:30:49.004717319Z",
+      "created_by": "/bin/sh -c #(nop) ADD file:2fc6364d149eccc7f94ead482a0dcf24b0e44cc0d00ac6a2c1797776153e9608 in / "
+    },
+    {
+      "created": "2023-04-25T17:30:49.231209804Z",
+      "created_by": "/bin/sh -c #(nop)  CMD [\"/bin/bash\"]",
+      "empty_layer": true
+    },
+    {
+      "created_by": "Nydus Converter",
+      "comment": "Nydus Bootstrap Layer"
+    }
+  ]
+}

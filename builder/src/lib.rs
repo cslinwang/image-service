@@ -36,6 +36,7 @@ pub use self::core::prefetch::{Prefetch, PrefetchPolicy};
 pub use self::core::tree::{MetadataTreeBuilder, Tree, TreeNode};
 pub use self::directory::DirectoryBuilder;
 pub use self::merge::Merger;
+pub use self::generate::Generater;
 pub use self::stargz::StargzBuilder;
 pub use self::tarball::TarballBuilder;
 
@@ -43,6 +44,7 @@ mod compact;
 mod core;
 mod directory;
 mod merge;
+mod generate;
 mod stargz;
 mod tarball;
 
@@ -294,7 +296,7 @@ impl TarBuilder {
                             tmp_tree.insert_child(Tree::new(node));
                             break;
                         } else {
-                            let node = self.create_directory(&target_paths[..=idx])?;
+                            let node: Node = self.create_directory(&target_paths[..=idx])?;
                             tmp_tree.insert_child(Tree::new(node));
                             let last_idx = tmp_tree.children.len() - 1;
                             tmp_tree = &mut tmp_tree.children[last_idx];

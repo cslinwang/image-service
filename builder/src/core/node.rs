@@ -277,13 +277,14 @@ impl Node {
 
         // `child_count` of regular file is reused as `chunk_count`.
         for i in 0..self.inode.child_count() {
-            let chunk_size = ctx.chunk_size;
+            let chunk_size: u32 = ctx.chunk_size;
             let file_offset = i as u64 * chunk_size as u64;
             let uncompressed_size = if i == self.inode.child_count() - 1 {
                 (self.inode.size() - chunk_size as u64 * i as u64) as u32
             } else {
                 chunk_size
             };
+            
 
             let chunk_data = &mut data_buf[0..uncompressed_size as usize];
             let (mut chunk, mut chunk_info) = self.read_file_chunk(ctx, reader, chunk_data)?;
