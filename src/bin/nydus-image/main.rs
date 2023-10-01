@@ -454,6 +454,14 @@ fn prepare_cmd_args(bti_string: &'static str) -> App {
                             .required(true)
                             .num_args(1..),
                     )
+                    .arg(
+                        Arg::new("verbose")
+                            .long("verbose")
+                            .short('v')
+                            .help("Output message in verbose mode")
+                            .action(ArgAction::SetTrue)
+                            .required(false),
+                    )
         )
     );
 
@@ -1219,48 +1227,8 @@ impl Command {
         Ok(())
     }
 
-    fn chunkdict_generate(matches: &ArgMatches, build_info: &BuildTimeInfo) -> Result<()> {
-        let source_bootstrap_paths: Vec<PathBuf> = matches
-            .get_many::<String>("SOURCE")
-            .map(|paths| paths.map(PathBuf::from).collect())
-            .unwrap();
-        let blob_sizes: Option<Vec<u64>> = matches.get_one::<String>("blob-sizes").map(|list| {
-            list.split(',')
-                .map(|item| {
-                    item.trim()
-                        .parse::<u64>()
-                        .expect("invalid number in --blob-sizes option")
-                })
-                .collect()
-        });
-        let blob_digests: Option<Vec<String>> =
-            matches.get_one::<String>("blob-digests").map(|list| {
-                list.split(',')
-                    .map(|item| item.trim().to_string())
-                    .collect()
-            });
-        let blob_toc_sizes: Option<Vec<u64>> =
-            matches.get_one::<String>("blob-toc-sizes").map(|list| {
-                list.split(',')
-                    .map(|item| {
-                        item.trim()
-                            .parse::<u64>()
-                            .expect("invalid number in --blob-toc-sizes option")
-                    })
-                    .collect()
-            });
-        let blob_toc_digests: Option<Vec<String>> =
-            matches.get_one::<String>("blob-toc-digests").map(|list| {
-                list.split(',')
-                    .map(|item| item.trim().to_string())
-                    .collect()
-            });
+    fn chunkdict_generate(matches: &ArgMatches, _build_info: &BuildTimeInfo) -> Result<()> {
         let target_bootstrap_path = Self::get_bootstrap_storage(matches)?;
-        let chunk_dict_path = if let Some(arg) = matches.get_one::<String>("chunk-dict") {
-            Some(parse_chunk_dict_arg(arg)?)
-        } else {
-            None
-        };
         let config =
             Self::get_configuration(matches).context("failed to get configuration information")?;
         config
@@ -1272,8 +1240,6 @@ impl Command {
         };
         ctx.configuration = config.clone();
 
-        let parent_bootstrap_path = Self::get_parent_bootstrap(matches)?;
-
         let chunkdict = vec![
             "488de202f73bd976de4e7048f4e1f39a776d86d582b7348ff53bf432b987fca8".to_string(),
             "49f6939dd32f964042931e8f43b82db737496f0e3a85a9b68a2ccf3ced7a8930".to_string(),
@@ -1281,20 +1247,23 @@ impl Command {
         ];
         ctx.set_chunkdict(chunkdict);
 
-
-        let output = Generater::generate(
+        Generater::generate(
             &mut ctx,
-            parent_bootstrap_path,
-            source_bootstrap_paths,
-            blob_digests,
-            blob_sizes,
-            blob_toc_digests,
-            blob_toc_sizes,
             target_bootstrap_path,
-            chunk_dict_path,
-            config,
         )?;
-        OutputSerializer::dump(matches, output, build_info)
+        
+        // 临时测试
+        let bootstrap_path =  Path::new("/home/runner/chunkdict-bootstrap");
+        let verbose = matches.get_flag("verbose");
+        let config = Self::get_configuration(matches)?;
+        let mut validator = Validator::new(bootstrap_path, config)?;
+        validator
+            .check(verbose)
+            .with_context(|| format!("failed to check bootstrap {:?}", bootstrap_path))?;
+
+        println!("RAFS filesystem metadata is valid, referenced data blobs: ");
+
+        Ok(())
     }
 
     fn merge(matches: &ArgMatches, build_info: &BuildTimeInfo) -> Result<()> {

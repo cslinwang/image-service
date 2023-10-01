@@ -254,7 +254,7 @@ pub struct MetadataTreeBuilder<'a> {
 
 impl<'a> MetadataTreeBuilder<'a> {
     fn new(rs: &'a RafsSuper) -> Self {
-        Self { rs }
+    Self { rs }
     }
 
     /// Build node tree by loading bootstrap file

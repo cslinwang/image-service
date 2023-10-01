@@ -284,7 +284,6 @@ impl Node {
             } else {
                 chunk_size
             };
-            
 
             let chunk_data = &mut data_buf[0..uncompressed_size as usize];
             let (mut chunk, mut chunk_info) = self.read_file_chunk(ctx, reader, chunk_data)?;
@@ -575,7 +574,10 @@ impl Node {
         // Query the database to check if the chunk ID exists
         if !Self::is_chunk_id_in_chunkdict(ctx, chunk.id())? {
             // If the chunk ID is not in the database, delete it
-            trace!("Chunk ID : {} not found in chunkdict, deleting.", chunk.id());
+            trace!(
+                "Chunk ID : {} not found in chunkdict, deleting.",
+                chunk.id()
+            );
             return Ok(None);
         }
 
