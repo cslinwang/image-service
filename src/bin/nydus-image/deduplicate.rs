@@ -828,7 +828,7 @@ pub struct Chunk {
     image_name: String,
     version_name: String,
     chunk_blob_id: String,
-    chunk_digest: String,
+    pub chunk_digest: String,
     chunk_compressed_size: u32,
     chunk_uncompressed_size: u32,
     chunk_compressed_offset: u64,
