@@ -29,7 +29,8 @@ use nydus_api::{BuildTimeInfo, ConfigV2, LocalFsConfig};
 use nydus_builder::{
     parse_chunk_dict_arg, ArtifactStorage, BlobCompactor, BlobManager, BootstrapManager,
     BuildContext, BuildOutput, Builder, ConversionType, DirectoryBuilder, Feature, Features,
-    HashChunkDict, Merger, Prefetch, PrefetchPolicy, StargzBuilder, TarballBuilder, WhiteoutSpec,
+    Generater, HashChunkDict, Merger, Prefetch, PrefetchPolicy, StargzBuilder, TarballBuilder,
+    WhiteoutSpec,
 };
 use nydus_rafs::metadata::{MergeError, RafsSuper, RafsSuperConfig, RafsVersion};
 use nydus_storage::backend::localfs::LocalFs;
@@ -374,8 +375,8 @@ fn prepare_cmd_args(bti_string: &'static str) -> App {
                     .arg(
                         Arg::new("database")
                             .long("database")
-                            .help("Database connection URI for assisting chunk dict generation, e.g. sqlite:///path/to/database.db")
-                            .default_value("sqlite://:memory:")
+                            .help("Database connection URI for assisting chunk dict generation, e.g. sqlite:///path/database.db")
+                            .default_value("sqlite:///home/runner/output/database.db")
                             .required(false),
                     )
                     .arg(
@@ -397,7 +398,265 @@ fn prepare_cmd_args(bti_string: &'static str) -> App {
                             .required(false),
                     )
                     .arg(arg_output_json.clone())
-            )
+                )
+                .subcommand(
+                    App::new("generate")
+                        .about("generate chunk dictionary based on database")
+                        .arg(
+                            Arg::new("database")
+                                .long("database")
+                                .help("Database connection address for assisting chunk dictionary generation, e.g. /path/database.db")
+                                .default_value("sqlite:///home/runner/output/database.db")
+                                .required(false),
+                        )
+                        .arg(
+                            Arg::new("parent-bootstrap")
+                                .long("parent-bootstrap")
+                                .help("File path of the parent/referenced RAFS metadata blob (optional)")
+                                .required(false),
+                        )
+                        .arg(
+                            Arg::new("bootstrap")
+                                .long("bootstrap")
+                                .short('B')
+                                .help("Output path of nydus overlaid bootstrap"),
+                        )
+                        .arg(
+                            Arg::new("blob-dir")
+                                .long("blob-dir")
+                                .short('D')
+                                .help("Directory path to save generated RAFS metadata and data blobs"),
+                        )
+                        .arg(arg_chunk_dict.clone())
+                        .arg(arg_prefetch_policy.clone())
+                        .arg(arg_output_json.clone())
+                        .arg(
+                            Arg::new("blob-digests")
+                                .long("blob-digests")
+                                .required(false)
+                                .help("RAFS blob digest list separated by comma"),
+                        )
+                        .arg(
+                            Arg::new("original-blob-ids")
+                                .long("original-blob-ids")
+                                .required(false)
+                                .help("original blob id list separated by comma, it may usually be a sha256 hex string"),
+                        )
+                        .arg(
+                            Arg::new("blob-sizes")
+                                .long("blob-sizes")
+                                .required(false)
+                                .help("RAFS blob size list separated by comma"),
+                        )
+                        .arg(
+                            Arg::new("blob-toc-digests")
+                                .long("blob-toc-digests")
+                                .required(false)
+                                .help("RAFS blob toc digest list separated by comma"),
+                        )
+                        .arg(
+                            Arg::new("blob-toc-sizes")
+                                .long("blob-toc-sizes")
+                                .required(false)
+                                .help("RAFS blob toc size list separated by comma"),
+                        )
+                        .arg(arg_config.clone())
+                        .arg(
+                            Arg::new("SOURCE")
+                                .help("bootstrap paths (allow one or more)")
+                                .required(true)
+                                .num_args(1..),
+                        )
+                        .arg(
+                            Arg::new("verbose")
+                                .long("verbose")
+                                .short('v')
+                                .help("Output message in verbose mode")
+                                .action(ArgAction::SetTrue)
+                                .required(false),
+                        )
+                    )
+                .subcommand(
+                    App::new("dump")
+                    .about("Merge multiple bootstraps into a overlaid bootstrap")
+                    .arg(
+                        Arg::new("SOURCE")
+                            .help("source from which to build the RAFS filesystem")
+                            .required(true)
+                            .num_args(1),
+                    )
+                    .arg(
+                        Arg::new("type")
+                            .long("type")
+                            .short('t')
+                            .alias("source-type")
+                            .help("Conversion type:")
+                            .default_value("dir-rafs")
+                            .value_parser([
+                                "directory",
+                                "dir-rafs",
+                                "estargz-rafs",
+                                "estargz-ref",
+                                "estargztoc-ref",
+                                "tar-rafs",
+                                "tar-tarfs",
+                                "targz-rafs",
+                                "targz-ref",
+                                "stargz_index",
+                            ])
+                    )
+                    .arg(
+                        Arg::new("bootstrap")
+                            .long("bootstrap")
+                            .short('B')
+                            .help("File path to save the generated RAFS metadata blob")
+                            .required_unless_present_any(&["blob-dir", "blob-inline-meta"])
+                            .conflicts_with("blob-inline-meta"),
+                    )
+                    .arg(
+                        Arg::new("blob-dir")
+                            .long("blob-dir")
+                            .short('D')
+                            .help("Directory path to save generated RAFS metadata and data blobs"),
+                    )
+                    .arg(
+                        Arg::new("blob")
+                            .long("blob")
+                            .short('b')
+                            .help("File path to save the generated RAFS data blob")
+                            .required_unless_present_any(&["type", "blob-dir"]),
+                    )
+                    .arg(
+                        Arg::new("blob-inline-meta")
+                            .long("blob-inline-meta")
+                            .alias("inline-bootstrap")
+                            .help("Inline RAFS metadata and blob metadata into the data blob")
+                            .action(ArgAction::SetTrue)
+                            .conflicts_with("blob-id")
+                            .required(false),
+                    )
+                    .arg(
+                        Arg::new("blob-id")
+                            .long("blob-id")
+                            .required_if_eq_any([("type", "estargztoc-ref"), ("type", "stargz_index")])
+                            .help("OSS object id for the generated RAFS data blob")
+                    )
+                    .arg(
+                        Arg::new("blob-data-size")
+                            .long("blob-data-size")
+                            .help("Set data blob size for 'estargztoc-ref' conversion"),
+                    )
+                    .arg(
+                        Arg::new("blob-offset")
+                            .long("blob-offset")
+                            .help("File offset to store RAFS data, to support storing data blobs into tar files")
+                            .hide(true)
+                            .default_value("0"),
+                    )
+                    .arg(
+                        Arg::new("chunk-size")
+                            .long("chunk-size")
+                            .help("Set the size of data chunks, must be power of two and between 0x1000-0x1000000:")
+                            .required(false),
+                    )
+                    .arg(
+                        Arg::new("batch-size")
+                            .long("batch-size")
+                            .help("Set the batch size to merge small chunks, must be power of two, between 0x1000-0x1000000 or be zero:")
+                            .required(false)
+                            .default_value("0"),
+                    )
+                    .arg(
+                        Arg::new("compressor")
+                            .long("compressor")
+                            .help("Algorithm to compress data chunks:")
+                            .required(false)
+                            .default_value("zstd")
+                            .value_parser(["none", "lz4_block", "zstd"]),
+                    )
+                    .arg(
+                        Arg::new("digester")
+                            .long("digester")
+                            .help("Algorithm to digest data chunks:")
+                            .required(false)
+                            .default_value("blake3")
+                            .value_parser(["blake3", "sha256"]),
+                    )
+                    .arg( arg_config.clone() )
+                    .arg(
+                        Arg::new("fs-version")
+                            .long("fs-version")
+                            .short('v')
+                            .help("Set RAFS format version number:")
+                            .default_value("6")
+                            .value_parser(["5", "6"]),
+                    )
+                    .arg(
+                        Arg::new("features")
+                            .long("features")
+                            .value_parser(["blob-toc"])
+                            .help("Enable/disable features")
+                    )
+                    .arg(
+                        arg_chunk_dict.clone(),
+                    )
+                    .arg(
+                        Arg::new("parent-bootstrap")
+                            .long("parent-bootstrap")
+                            .help("File path of the parent/referenced RAFS metadata blob (optional)")
+                            .required(false),
+                    )
+                    .arg(
+                        Arg::new("aligned-chunk")
+                            .long("aligned-chunk")
+                            .help("Align uncompressed data chunks to 4K, only for RAFS V5")
+                            .action(ArgAction::SetTrue)
+                    )
+                    .arg(
+                        Arg::new("repeatable")
+                            .long("repeatable")
+                            .help("Generate reproducible RAFS metadata")
+                            .action(ArgAction::SetTrue)
+                            .required(false),
+                    )
+                    .arg(
+                        Arg::new("disable-check")
+                            .long("disable-check")
+                            .help("Disable RAFS metadata validation after build")
+                            .hide(true)
+                            .action(ArgAction::SetTrue)
+                            .required(false)
+                    )
+                    .arg(
+                        Arg::new("whiteout-spec")
+                            .long("whiteout-spec")
+                            .help("Set the type of whiteout specification:")
+                            .default_value("oci")
+                            .value_parser(["oci", "overlayfs", "none"])
+                    )
+                    .arg(
+                        arg_prefetch_policy.clone(),
+                    )
+                    .arg(
+                        arg_output_json.clone(),
+                    )
+                    .arg(
+                        Arg::new("encrypt")
+                            .long("encrypt")
+                            .short('E')
+                            .help("Encrypt the generated RAFS metadata and data blobs")
+                            .action(ArgAction::SetTrue)
+                            .required(false)
+                    )
+                    .arg(
+                        Arg::new("verbose")
+                            .long("verbose")
+                            // .short('v')
+                            .help("Output message in verbose mode")
+                            .action(ArgAction::SetTrue)
+                            .required(false),
+                    )
+                )
                 );
 
     let app = app.subcommand(
@@ -422,7 +681,6 @@ fn prepare_cmd_args(bti_string: &'static str) -> App {
                     .help("Directory path to save generated RAFS metadata and data blobs"),
             )
             .arg(arg_chunk_dict.clone())
-            .arg(arg_prefetch_policy)
             .arg(arg_output_json.clone())
             .arg(
                 Arg::new("blob-digests")
@@ -752,6 +1010,14 @@ fn main() -> Result<()> {
     } else if let Some(matches) = cmd.subcommand_matches("chunkdict") {
         match matches.subcommand_name() {
             Some("save") => Command::chunkdict_save(matches.subcommand_matches("save").unwrap()),
+            Some("generate") => {
+                Command::chunkdict_generate(matches.subcommand_matches("generate").unwrap())
+            }
+            Some("dump") => Command::chunkdict_dump(
+                matches.subcommand_matches("dump").unwrap(),
+                &build_info,
+                None,
+            ),
             _ => {
                 println!("{}", usage);
                 Ok(())
@@ -1152,14 +1418,25 @@ impl Command {
 
     fn chunkdict_save(matches: &ArgMatches) -> Result<()> {
         let bootstrap_path = Self::get_bootstrap(matches)?;
+        let path = bootstrap_path.display().to_string();
+        info!("Bootstrap path is {}", path);
+        let path_name: Vec<&str> = path.split('/').collect();
+        let full_image_name: Vec<&str> = path_name[4].split(':').collect();
+        let image_name = match full_image_name.get(full_image_name.len() - 2) {
+            Some(&second_last) => second_last.to_string(),
+            None => bail!("Invalid image name"),
+        };
+        let version_name = match full_image_name.last() {
+            Some(&last) => last.to_string(),
+            None => bail!("Invalid version name"),
+        };
         let config = Self::get_configuration(matches)?;
         let db_url: &String = matches.get_one::<String>("database").unwrap();
-        debug!("db_url: {}", db_url);
+
         // For backward compatibility with v2.1.
         config
             .internal
             .set_blob_accessible(matches.get_one::<String>("bootstrap").is_none());
-
         let db_strs: Vec<&str> = db_url.split("://").collect();
         if db_strs.len() != 2 || (!db_strs[1].starts_with('/') && !db_strs[1].starts_with(':')) {
             bail!("Invalid database URL: {}", db_url);
@@ -1169,13 +1446,519 @@ impl Command {
             "sqlite" => {
                 let mut deduplicate: Deduplicate<SqliteDatabase> =
                     Deduplicate::<SqliteDatabase>::new(db_strs[1])?;
-                deduplicate.save_metadata(bootstrap_path, config)?
+                deduplicate.save_metadata(bootstrap_path, config, image_name, version_name)?
             }
             _ => {
                 bail!("Unsupported database type: {}, please use a valid database URI, such as 'sqlite:///path/to/database.db'.", db_strs[0])
             }
         };
         info!("Chunkdict metadata is saved at: {:?}", db_url);
+        Ok(())
+    }
+
+    fn chunkdict_generate(matches: &ArgMatches) -> Result<()> {
+        // Connecting database and Generating chunk dictionary by algorithm "exponential_smoothing"
+        let db_url: &String = matches.get_one::<String>("database").unwrap();
+        debug!("db_url: {}", db_url);
+        let db_strs: Vec<&str> = db_url.split("://").collect();
+        let algorithm = String::from("exponential_smoothing");
+        let mut algorithm: deduplicate::Algorithm<SqliteDatabase> =
+            deduplicate::Algorithm::<SqliteDatabase>::new(algorithm, db_strs[1])?;
+        let (chunkdict, noise_points) = algorithm.chunkdict_generate()?;
+        info!(
+            "The length of chunkdict is {}",
+            Vec::<deduplicate::Chunk>::len(&chunkdict)
+        );
+        info!("It is not recommended to use image deduplication");
+        for image_name in noise_points {
+            info!("{}", image_name);
+        }
+        // To be continued, dump chunk of "chunk dictionary" ...
+        let build_info = BTI.to_owned();
+        let chunkdict = chunkdict
+            .iter()
+            .map(|chunk| chunk.chunk_digest.clone())
+            .collect::<Vec<String>>();
+        Command::chunkdict_dump(matches, &build_info, Some(chunkdict)).unwrap();
+        Ok(())
+    }
+    fn chunkdict_dump(
+        matches: &ArgMatches,
+        build_info: &BuildTimeInfo,
+        chunkdict: Option<Vec<String>>,
+    ) -> Result<()> {
+        let blob_id = Self::get_blob_id(matches)?;
+        let blob_offset = Self::get_blob_offset(matches)?;
+        let parent_path = Self::get_parent_bootstrap(matches)?;
+        let prefetch = Self::get_prefetch(matches)?;
+        let source_path = PathBuf::from(matches.get_one::<String>("SOURCE").unwrap());
+        let conversion_type: ConversionType = matches.get_one::<String>("type").unwrap().parse()?;
+        let blob_storage = Self::get_blob_storage(matches, conversion_type)?;
+        let blob_inline_meta = matches.get_flag("blob-inline-meta");
+        let repeatable = matches.get_flag("repeatable");
+        let version = Self::get_fs_version(matches)?;
+        let chunk_size = Self::get_chunk_size(matches, conversion_type)?;
+        let batch_size = Self::get_batch_size(matches, version, conversion_type, chunk_size)?;
+        let aligned_chunk = if version.is_v6() && conversion_type != ConversionType::TarToTarfs {
+            true
+        } else {
+            // get_fs_version makes sure it's either v6 or v5.
+            matches.get_flag("aligned-chunk")
+        };
+        let whiteout_spec: WhiteoutSpec = matches
+            .get_one::<String>("whiteout-spec")
+            .map(|s| s.as_str())
+            .unwrap_or_default()
+            .parse()?;
+        let mut compressor = matches
+            .get_one::<String>("compressor")
+            .map(|s| s.as_str())
+            .unwrap_or_default()
+            .parse()?;
+        let mut digester = matches
+            .get_one::<String>("digester")
+            .map(|s| s.as_str())
+            .unwrap_or_default()
+            .parse()?;
+        let blob_data_size = Self::get_blob_size(matches, conversion_type)?;
+        let features = Features::try_from(
+            matches
+                .get_one::<String>("features")
+                .map(|s| s.as_str())
+                .unwrap_or_default(),
+        )?;
+        let encrypt = matches.get_flag("encrypt");
+        match conversion_type {
+            ConversionType::DirectoryToRafs => {
+                Self::ensure_directory(&source_path)?;
+                if blob_storage.is_none() {
+                    bail!("both --blob and --blob-dir are missing");
+                }
+            }
+            ConversionType::EStargzToRafs
+            | ConversionType::TargzToRafs
+            | ConversionType::TarToRafs => {
+                Self::ensure_file(&source_path)?;
+                if blob_storage.is_none() {
+                    bail!("both --blob and --blob-dir are missing");
+                }
+            }
+            ConversionType::TarToRef
+            | ConversionType::TargzToRef
+            | ConversionType::EStargzToRef => {
+                Self::ensure_file(&source_path)?;
+                if matches.value_source("compressor") != Some(ValueSource::DefaultValue)
+                    && compressor != compress::Algorithm::GZip
+                {
+                    info!(
+                        "only GZip is supported for conversion type {}, use GZip instead of {}",
+                        conversion_type, compressor
+                    );
+                }
+                if matches.value_source("digester") != Some(ValueSource::DefaultValue)
+                    && digester != digest::Algorithm::Sha256
+                {
+                    info!(
+                        "only SHA256 is supported for conversion type {}, use SHA256 instead of {}",
+                        conversion_type, compressor
+                    );
+                }
+                compressor = compress::Algorithm::GZip;
+                digester = digest::Algorithm::Sha256;
+                if blob_storage.is_none() {
+                    bail!("both --blob and --blob-dir are missing");
+                } else if !prefetch.disabled && prefetch.policy == PrefetchPolicy::Blob {
+                    bail!(
+                        "conversion type {} conflicts with '--prefetch-policy blob'",
+                        conversion_type
+                    );
+                }
+                if version != RafsVersion::V6 {
+                    bail!(
+                        "'--fs-version 5' conflicts with conversion type '{}', only V6 is supported",
+                        conversion_type
+                    );
+                }
+                if blob_id.trim() != "" {
+                    bail!(
+                        "conversion type '{}' conflicts with '--blob-id'",
+                        conversion_type
+                    );
+                }
+                if encrypt {
+                    bail!(
+                        "conversion type '{}' conflicts with '--encrypt'",
+                        conversion_type
+                    )
+                }
+            }
+            ConversionType::TarToTarfs => {
+                Self::ensure_file(&source_path)?;
+                if matches.value_source("compressor") != Some(ValueSource::DefaultValue)
+                    && compressor != compress::Algorithm::None
+                {
+                    info!(
+                        "only compressor `None` is supported for conversion type {}, use `None` instead of {}",
+                        conversion_type, compressor
+                    );
+                }
+                if matches.value_source("digester") != Some(ValueSource::DefaultValue)
+                    && digester != digest::Algorithm::Sha256
+                {
+                    info!(
+                        "only SHA256 is supported for conversion type {}, use SHA256 instead of {}",
+                        conversion_type, compressor
+                    );
+                }
+                compressor = compress::Algorithm::None;
+                digester = digest::Algorithm::Sha256;
+                if blob_storage.is_none() {
+                    bail!("both --blob and --blob-dir are missing");
+                } else if !prefetch.disabled && prefetch.policy == PrefetchPolicy::Blob {
+                    bail!(
+                        "conversion type {} conflicts with '--prefetch-policy blob'",
+                        conversion_type
+                    );
+                }
+                if version != RafsVersion::V6 {
+                    bail!(
+                        "'--fs-version 5' conflicts with conversion type '{}', only V6 is supported",
+                        conversion_type
+                    );
+                }
+                if matches.get_one::<String>("chunk-dict").is_some() {
+                    bail!(
+                        "conversion type '{}' conflicts with '--chunk-dict'",
+                        conversion_type
+                    );
+                }
+                if parent_path.is_some() {
+                    bail!(
+                        "conversion type '{}' conflicts with '--parent-bootstrap'",
+                        conversion_type
+                    );
+                }
+                if blob_inline_meta {
+                    bail!(
+                        "conversion type '{}' conflicts with '--blob-inline-meta'",
+                        conversion_type
+                    );
+                }
+                if features.is_enabled(Feature::BlobToc) {
+                    bail!(
+                        "conversion type '{}' conflicts with '--features blob-toc'",
+                        conversion_type
+                    );
+                }
+                if aligned_chunk {
+                    bail!(
+                        "conversion type '{}' conflicts with '--aligned-chunk'",
+                        conversion_type
+                    );
+                }
+                if encrypt {
+                    bail!(
+                        "conversion type '{}' conflicts with '--encrypt'",
+                        conversion_type
+                    )
+                }
+            }
+            ConversionType::EStargzIndexToRef => {
+                Self::ensure_file(&source_path)?;
+                if matches.value_source("compressor") != Some(ValueSource::DefaultValue)
+                    && compressor != compress::Algorithm::GZip
+                {
+                    info!(
+                        "only GZip is supported for conversion type {}, use GZip instead of {}",
+                        conversion_type, compressor
+                    );
+                }
+                if matches.value_source("digester") != Some(ValueSource::DefaultValue)
+                    && digester != digest::Algorithm::Sha256
+                {
+                    info!(
+                        "only SHA256 is supported for conversion type {}, use SHA256 instead of {}",
+                        conversion_type, compressor
+                    );
+                }
+                compressor = compress::Algorithm::GZip;
+                digester = digest::Algorithm::Sha256;
+                if blob_storage.is_some() {
+                    bail!(
+                        "conversion type '{}' conflicts with '--blob'",
+                        conversion_type
+                    );
+                }
+                if version != RafsVersion::V6 {
+                    bail!(
+                        "'--fs-version 5' conflicts with conversion type '{}', only V6 is supported",
+                        conversion_type
+                    );
+                }
+                if blob_id.trim() == "" {
+                    bail!("'--blob-id' is missing for '--type stargz_index'");
+                }
+                if encrypt {
+                    bail!(
+                        "conversion type '{}' conflicts with '--encrypt'",
+                        conversion_type
+                    )
+                }
+            }
+            ConversionType::DirectoryToStargz
+            | ConversionType::TargzToStargz
+            | ConversionType::TarToStargz => {
+                unimplemented!()
+            }
+            ConversionType::DirectoryToTargz => {
+                unimplemented!()
+            }
+        }
+
+        if features.is_enabled(Feature::BlobToc) && version == RafsVersion::V5 {
+            bail!("`--features blob-toc` can't be used with `--version 5` ");
+        }
+
+        let mut build_ctx = BuildContext::new(
+            blob_id,
+            aligned_chunk,
+            blob_offset,
+            compressor,
+            digester,
+            !repeatable,
+            whiteout_spec,
+            conversion_type,
+            source_path,
+            prefetch,
+            blob_storage,
+            blob_inline_meta,
+            features,
+            encrypt,
+        );
+        build_ctx.set_fs_version(version);
+        build_ctx.set_chunk_size(chunk_size);
+        build_ctx.set_batch_size(batch_size);
+
+        if let Some(chunkdict) = chunkdict {
+            build_ctx.set_chunkdict(chunkdict);
+        }
+
+        let chunkdict = vec![
+            "488de202f73bd976de4e7048f4e1f39a776d86d582b7348ff53bf432b987fca8".to_string(),
+            "49f6939dd32f964042931e8f43b82db737496f0e3a85a9b68a2ccf3ced7a8930".to_string(),
+            "275a6cc04c2bc476d8f93baf1e8c04c6ed53ceb0874cf508fdf3dbc7320c4021".to_string(),
+        ];
+        build_ctx.set_chunkdict(chunkdict);
+        
+        let mut config = Self::get_configuration(matches)?;
+        if let Some(cache) = Arc::get_mut(&mut config).unwrap().cache.as_mut() {
+            cache.cache_validate = true;
+        }
+        config.internal.set_blob_accessible(true);
+        build_ctx.set_configuration(config.clone());
+
+        let mut blob_mgr = BlobManager::new(digester);
+        if let Some(chunk_dict_arg) = matches.get_one::<String>("chunk-dict") {
+            let config = RafsSuperConfig {
+                version,
+                compressor,
+                digester,
+                chunk_size,
+                batch_size,
+                explicit_uidgid: !repeatable,
+                is_tarfs_mode: false,
+            };
+            let rafs_config = Arc::new(build_ctx.configuration.as_ref().clone());
+            // The separate chunk dict bootstrap doesn't support blob accessible.
+            rafs_config.internal.set_blob_accessible(false);
+            blob_mgr.set_chunk_dict(timing_tracer!(
+                { HashChunkDict::from_commandline_arg(chunk_dict_arg, rafs_config, &config,) },
+                "import_chunk_dict"
+            )?);
+        }
+
+        let mut bootstrap_mgr = if blob_inline_meta {
+            BootstrapManager::new(None, parent_path)
+        } else {
+            let bootstrap_path = Self::get_bootstrap_storage(matches)?;
+            BootstrapManager::new(Some(bootstrap_path), parent_path)
+        };
+
+        // Legality has been checked and filtered by `get_batch_size()`.
+        if build_ctx.batch_size > 0 {
+            let generator = BatchContextGenerator::new(build_ctx.batch_size)?;
+            build_ctx.blob_batch_generator = Some(Mutex::new(generator));
+            build_ctx.blob_features.insert(BlobFeatures::BATCH);
+            build_ctx.blob_features.insert(BlobFeatures::CHUNK_INFO_V2);
+        }
+
+        let mut builder: Box<dyn Builder> = match conversion_type {
+            ConversionType::DirectoryToRafs => {
+                if encrypt {
+                    build_ctx.blob_features.insert(BlobFeatures::CHUNK_INFO_V2);
+                    build_ctx.blob_features.insert(BlobFeatures::ENCRYPTED);
+                }
+                Box::new(DirectoryBuilder::new())
+            }
+            ConversionType::EStargzIndexToRef => {
+                Box::new(StargzBuilder::new(blob_data_size, &build_ctx))
+            }
+            ConversionType::EStargzToRafs
+            | ConversionType::TargzToRafs
+            | ConversionType::TarToRafs => {
+                if encrypt {
+                    build_ctx.blob_features.insert(BlobFeatures::CHUNK_INFO_V2);
+                    build_ctx.blob_features.insert(BlobFeatures::ENCRYPTED);
+                }
+                Box::new(TarballBuilder::new(conversion_type))
+            }
+            ConversionType::EStargzToRef
+            | ConversionType::TargzToRef
+            | ConversionType::TarToRef => {
+                if version.is_v5() {
+                    bail!("conversion type {} conflicts with RAFS v5", conversion_type);
+                }
+                build_ctx.blob_features.insert(BlobFeatures::CHUNK_INFO_V2);
+                build_ctx.blob_features.insert(BlobFeatures::SEPARATE);
+                Box::new(TarballBuilder::new(conversion_type))
+            }
+            ConversionType::TarToTarfs => {
+                if version.is_v5() {
+                    bail!("conversion type {} conflicts with RAFS v5", conversion_type);
+                }
+                Box::new(TarballBuilder::new(conversion_type))
+            }
+            ConversionType::DirectoryToStargz
+            | ConversionType::DirectoryToTargz
+            | ConversionType::TarToStargz
+            | ConversionType::TargzToStargz => unimplemented!(),
+        };
+        let build_output = timing_tracer!(
+            {
+                builder
+                    .build(&mut build_ctx, &mut bootstrap_mgr, &mut blob_mgr)
+                    .context("build failed")
+            },
+            "total_build"
+        )?;
+
+        lazy_drop(build_ctx);
+
+        // Some operations like listing xattr pairs of certain namespace need the process
+        // to be privileged. Therefore, trace what euid and egid are.
+        event_tracer!("euid", "{}", geteuid());
+        event_tracer!("egid", "{}", getegid());
+        info!("successfully built RAFS filesystem: \n{}", build_output);
+        OutputSerializer::dump(matches, build_output, build_info).unwrap();
+
+        // // 临时测试
+        let bootstrap_path = Path::new("/home/runner/bootstrap");
+        let verbose = matches.get_flag("verbose");
+        let config = Self::get_configuration(matches)?;
+        let mut validator = Validator::new(bootstrap_path, config)?;
+        validator
+            .check(verbose)
+            .with_context(|| format!("failed to check bootstrap {:?}", bootstrap_path))?;
+
+        println!("RAFS filesystem metadata is valid, referenced data blobs: ");
+
+        Ok(())
+    }
+
+    fn _chunkdict_dump_back(
+        matches: &ArgMatches,
+        build_info: &BuildTimeInfo,
+        chunkdict: Option<Vec<String>>,
+    ) -> Result<()> {
+        let source_bootstrap_paths: Vec<PathBuf> = matches
+            .get_many::<String>("SOURCE")
+            .map(|paths| paths.map(PathBuf::from).collect())
+            .unwrap();
+
+        let blob_sizes: Option<Vec<u64>> = matches.get_one::<String>("blob-sizes").map(|list| {
+            list.split(',')
+                .map(|item| {
+                    item.trim()
+                        .parse::<u64>()
+                        .expect("invalid number in --blob-sizes option")
+                })
+                .collect()
+        });
+        let blob_digests: Option<Vec<String>> =
+            matches.get_one::<String>("blob-digests").map(|list| {
+                list.split(',')
+                    .map(|item| item.trim().to_string())
+                    .collect()
+            });
+        let original_blob_ids: Option<Vec<String>> =
+            matches.get_one::<String>("original-blob-ids").map(|list| {
+                list.split(',')
+                    .map(|item| item.trim().to_string())
+                    .collect()
+            });
+        let blob_toc_sizes: Option<Vec<u64>> =
+            matches.get_one::<String>("blob-toc-sizes").map(|list| {
+                list.split(',')
+                    .map(|item| {
+                        item.trim()
+                            .parse::<u64>()
+                            .expect("invalid number in --blob-toc-sizes option")
+                    })
+                    .collect()
+            });
+        let blob_toc_digests: Option<Vec<String>> =
+            matches.get_one::<String>("blob-toc-digests").map(|list| {
+                list.split(',')
+                    .map(|item| item.trim().to_string())
+                    .collect()
+            });
+        let target_bootstrap_path = Self::get_bootstrap_storage(matches)?;
+        let chunk_dict_path = if let Some(arg) = matches.get_one::<String>("chunk-dict") {
+            Some(parse_chunk_dict_arg(arg)?)
+        } else {
+            None
+        };
+        let config =
+            Self::get_configuration(matches).context("failed to get configuration information")?;
+        config
+            .internal
+            .set_blob_accessible(matches.get_one::<String>("config").is_some());
+        let mut ctx = BuildContext {
+            prefetch: Self::get_prefetch(matches)?,
+            ..Default::default()
+        };
+        ctx.configuration = config.clone();
+
+        let parent_bootstrap_path = Self::get_parent_bootstrap(matches)?;
+
+        if let Some(chunkdict) = chunkdict {
+            ctx.set_chunkdict(chunkdict);
+        }
+        let output = Generater::generate(
+            &mut ctx,
+            parent_bootstrap_path,
+            source_bootstrap_paths,
+            blob_digests,
+            original_blob_ids,
+            blob_sizes,
+            blob_toc_digests,
+            blob_toc_sizes,
+            target_bootstrap_path,
+            chunk_dict_path,
+            config,
+        )?;
+        OutputSerializer::dump(matches, output, build_info).unwrap();
+        // 临时测试
+        let bootstrap_path = Path::new("/home/runner/merge-bootstrap");
+        let verbose = matches.get_flag("verbose");
+        let config = Self::get_configuration(matches)?;
+        let mut validator = Validator::new(bootstrap_path, config)?;
+        validator
+            .check(verbose)
+            .with_context(|| format!("failed to check bootstrap {:?}", bootstrap_path))?;
+
+        println!("RAFS filesystem metadata is valid, referenced data blobs: ");
+
         Ok(())
     }
 
