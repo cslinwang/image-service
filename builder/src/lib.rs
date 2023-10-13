@@ -36,6 +36,8 @@ pub use self::core::prefetch::{Prefetch, PrefetchPolicy};
 pub use self::core::tree::{MetadataTreeBuilder, Tree, TreeNode};
 pub use self::directory::DirectoryBuilder;
 pub use self::merge::Merger;
+pub use self::generate::Generater;
+pub use self::generate::ChunkdictChunkInfo;
 pub use self::stargz::StargzBuilder;
 pub use self::tarball::TarballBuilder;
 
@@ -43,6 +45,7 @@ mod compact;
 mod core;
 mod directory;
 mod merge;
+mod generate;
 mod stargz;
 mod tarball;
 

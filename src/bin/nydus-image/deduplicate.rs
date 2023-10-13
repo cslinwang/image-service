@@ -6,6 +6,7 @@
 use anyhow::{Context, Result};
 use core::cmp::Ordering;
 use nydus_api::ConfigV2;
+use nydus_builder::ChunkdictChunkInfo;
 use nydus_builder::Tree;
 use nydus_rafs::metadata::RafsSuper;
 use nydus_storage::device::BlobInfo;
@@ -51,13 +52,13 @@ pub trait Database {
     fn create_blob_table(&self) -> Result<()>;
 
     /// Inserts chunk information into the database.
-    fn insert_chunk(&self, chunk_info: &Chunk) -> Result<()>;
+    fn insert_chunk(&self, chunk_info: &ChunkdictChunkInfo) -> Result<()>;
 
     /// Inserts blob information into the database.
     fn insert_blob(&self, blob_info: &Blob) -> Result<()>;
 
     /// Retrieves all chunk information from the database.
-    fn get_chunks(&self) -> Result<Vec<Chunk>>;
+    fn get_chunks(&self) -> Result<Vec<ChunkdictChunkInfo>>;
 
     /// Retrieves all blob information from the database.
     fn get_blobs(&self) -> Result<Vec<Blob>>;
@@ -106,7 +107,7 @@ impl Database for SqliteDatabase {
         BlobTable::create(&self.blob_table).context("Failed to create blob table")
     }
 
-    fn insert_chunk(&self, chunk: &Chunk) -> Result<()> {
+    fn insert_chunk(&self, chunk: &ChunkdictChunkInfo) -> Result<()> {
         self.chunk_table
             .insert(chunk)
             .context("Failed to insert chunk")
@@ -118,7 +119,7 @@ impl Database for SqliteDatabase {
             .context("Failed to insert blob")
     }
 
-    fn get_chunks(&self) -> Result<Vec<Chunk>> {
+    fn get_chunks(&self) -> Result<Vec<ChunkdictChunkInfo>> {
         ChunkTable::list_all(&self.chunk_table).context("Failed to get chunks")
     }
 
@@ -194,7 +195,7 @@ impl Deduplicate<SqliteDatabase> {
                 let index = chunk.inner.blob_index();
                 let chunk_blob_id = blob_infos[index as usize].blob_id();
                 self.db
-                    .insert_chunk(&Chunk {
+                    .insert_chunk(&ChunkdictChunkInfo {
                         image_name: image_name.to_string(),
                         version_name: version_name.to_string(),
                         chunk_blob_id,
@@ -220,8 +221,8 @@ pub struct Algorithm<D: Database + Send + Sync> {
     db: D,
 }
 
-type Versiondic = HashMap<String, Vec<Chunk>>;
-type Imagedic = Vec<HashMap<Vec<String>, Vec<Chunk>>>;
+type Versiondic = HashMap<String, Vec<ChunkdictChunkInfo>>;
+type Imagedic = Vec<HashMap<Vec<String>, Vec<ChunkdictChunkInfo>>>;
 
 impl Algorithm<SqliteDatabase> {
     pub fn new(algorithm: String, db_url: &str) -> anyhow::Result<Self> {
@@ -231,9 +232,9 @@ impl Algorithm<SqliteDatabase> {
     }
 
     // Call the algorithm to generate a dictionary
-    pub fn chunkdict_generate(&mut self) -> anyhow::Result<(Vec<Chunk>, Vec<String>)> {
+    pub fn chunkdict_generate(&mut self) -> anyhow::Result<(Vec<ChunkdictChunkInfo>, Vec<String>)> {
         let all_chunks = self.db.chunk_table.list_all()?;
-        let mut chunkdict: Vec<Chunk> = Vec::new();
+        let mut chunkdict: Vec<ChunkdictChunkInfo> = Vec::new();
         let mut core_image = Vec::new();
         let mut noise_points = Vec::new();
         let (chunkdict_version, chunkdict_image) = match &self.algorithm_name as &str {
@@ -264,7 +265,7 @@ impl Algorithm<SqliteDatabase> {
     // List all chunk and sort them by the order in chunk table
     // Score each chunk by "exponential_smoothing" formula
     // Select chunks whose score is greater than threshold and generate chunk dictionary
-    fn exponential_smoothing(all_chunks: Vec<Chunk>, threshold: f64) -> anyhow::Result<Vec<Chunk>> {
+    fn exponential_smoothing(all_chunks: Vec<ChunkdictChunkInfo>, threshold: f64) -> anyhow::Result<Vec<ChunkdictChunkInfo>> {
         let alpha = 0.5;
         let mut smoothed_data = Vec::new();
 
@@ -300,9 +301,9 @@ impl Algorithm<SqliteDatabase> {
             }
         }
 
-        let mut chunkdict: Vec<Chunk> = Vec::new();
+        let mut chunkdict: Vec<ChunkdictChunkInfo> = Vec::new();
         for i in 0..smoothed_data.len() {
-            let chunk = Chunk {
+            let chunk = ChunkdictChunkInfo {
                 image_name: all_chunks[i].image_name.clone(),
                 version_name: all_chunks[i].version_name.clone(),
                 chunk_blob_id: all_chunks[i].chunk_blob_id.clone(),
@@ -318,18 +319,18 @@ impl Algorithm<SqliteDatabase> {
         }
 
         // Deduplicate chunk dictionary
-        let mut unique_chunks: BTreeMap<String, Chunk> = BTreeMap::new();
+        let mut unique_chunks: BTreeMap<String, ChunkdictChunkInfo> = BTreeMap::new();
         for chunk in &chunkdict {
             if !unique_chunks.contains_key(&chunk.chunk_digest) {
                 unique_chunks.insert(chunk.chunk_digest.clone(), chunk.clone());
             }
         }
-        let unique_chunk_list: Vec<Chunk> = unique_chunks.values().cloned().collect();
+        let unique_chunk_list: Vec<ChunkdictChunkInfo> = unique_chunks.values().cloned().collect();
         Ok(unique_chunk_list)
     }
 
     // Calculate the distance between two images
-    fn distance(image1: &[Chunk], image2: &[Chunk]) -> anyhow::Result<f64> {
+    fn distance(image1: &[ChunkdictChunkInfo], image2: &[ChunkdictChunkInfo]) -> anyhow::Result<f64> {
         // The total size of all chunks in both images
         let mut image1_size = 0;
         let mut image2_size = 0;
@@ -342,7 +343,7 @@ impl Algorithm<SqliteDatabase> {
         }
 
         // The total size of the chunk repeated between two images
-        let all_chunks: Vec<&Chunk> = image1.iter().chain(image2.iter()).collect();
+        let all_chunks: Vec<&ChunkdictChunkInfo> = image1.iter().chain(image2.iter()).collect();
         let mut compressed_size_map: std::collections::HashMap<String, u32> =
             std::collections::HashMap::new();
         let mut processed_digests: HashSet<&String> = HashSet::new();
@@ -363,8 +364,8 @@ impl Algorithm<SqliteDatabase> {
     }
 
     // Divide the chunk list into sublists by image name
-    fn devide_by_image(all_chunks: &[Chunk]) -> anyhow::Result<Vec<DataPoint>> {
-        let mut image_chunks: std::collections::HashMap<String, Vec<Chunk>> =
+    fn devide_by_image(all_chunks: &[ChunkdictChunkInfo]) -> anyhow::Result<Vec<DataPoint>> {
+        let mut image_chunks: std::collections::HashMap<String, Vec<ChunkdictChunkInfo>> =
             std::collections::HashMap::new();
         let mut datadict: Vec<DataPoint> = Vec::new();
         for chunk in all_chunks {
@@ -387,11 +388,11 @@ impl Algorithm<SqliteDatabase> {
     }
 
     fn devide_set(
-        chunks: &[Chunk],
+        chunks: &[ChunkdictChunkInfo],
         train_percentage: f64,
-    ) -> anyhow::Result<(Vec<Chunk>, Vec<Chunk>)> {
+    ) -> anyhow::Result<(Vec<ChunkdictChunkInfo>, Vec<ChunkdictChunkInfo>)> {
         // Create a HashMap to store the list of chunks for each image_name
-        let mut image_chunks: BTreeMap<String, Vec<Chunk>> = BTreeMap::new();
+        let mut image_chunks: BTreeMap<String, Vec<ChunkdictChunkInfo>> = BTreeMap::new();
 
         // Group chunks into image_name
         for chunk in chunks {
@@ -402,12 +403,12 @@ impl Algorithm<SqliteDatabase> {
         }
 
         // Create the final training and testing sets
-        let mut train_set: Vec<Chunk> = Vec::new();
-        let mut test_set: Vec<Chunk> = Vec::new();
+        let mut train_set: Vec<ChunkdictChunkInfo> = Vec::new();
+        let mut test_set: Vec<ChunkdictChunkInfo> = Vec::new();
 
         // Iterate through the list of Chunks for each image_name
         for (_, chunk_list) in image_chunks.iter_mut() {
-            let mut version_chunks: BTreeMap<CustomString, Vec<Chunk>> = BTreeMap::new();
+            let mut version_chunks: BTreeMap<CustomString, Vec<ChunkdictChunkInfo>> = BTreeMap::new();
             // Group the chunks in the image into version_name
             for chunk in chunk_list {
                 let entry = version_chunks
@@ -514,7 +515,7 @@ impl Algorithm<SqliteDatabase> {
     // Aggregate the chunks in each cluster into a dictionary
     fn aggregate_chunk(
         data_point: &[DataPoint],
-    ) -> anyhow::Result<HashMap<Vec<String>, Vec<Chunk>>> {
+    ) -> anyhow::Result<HashMap<Vec<String>, Vec<ChunkdictChunkInfo>>> {
         // Divide chunk list according to clusters
         let mut cluster_map: HashMap<i32, Vec<usize>> = HashMap::new();
         for (index, point) in data_point.iter().enumerate() {
@@ -528,7 +529,7 @@ impl Algorithm<SqliteDatabase> {
         }
 
         // Iterate through each cluster
-        let mut dictionary: HashMap<Vec<String>, Vec<Chunk>> = HashMap::new();
+        let mut dictionary: HashMap<Vec<String>, Vec<ChunkdictChunkInfo>> = HashMap::new();
         for (_, cluster_points) in cluster_map.iter() {
             let mut image_total_counts: HashMap<&str, usize> = HashMap::new();
             let mut image_list: Vec<String> = Vec::new();
@@ -559,7 +560,7 @@ impl Algorithm<SqliteDatabase> {
                 }
             }
 
-            let mut chunk_list: Vec<Chunk> = Vec::new();
+            let mut chunk_list: Vec<ChunkdictChunkInfo> = Vec::new();
             let mut added_chunk_digests: HashSet<String> = HashSet::new();
             for &point_index in cluster_points {
                 let point = &data_point[point_index];
@@ -580,11 +581,11 @@ impl Algorithm<SqliteDatabase> {
     }
 
     fn deduplicate_image(
-        all_chunks: Vec<Chunk>,
-    ) -> anyhow::Result<Vec<HashMap<Vec<String>, Vec<Chunk>>>> {
+        all_chunks: Vec<ChunkdictChunkInfo>,
+    ) -> anyhow::Result<Vec<HashMap<Vec<String>, Vec<ChunkdictChunkInfo>>>> {
         let mut counter = 0;
         let all_chunks_clone = all_chunks;
-        let mut data_dict: Vec<HashMap<Vec<String>, Vec<Chunk>>> = Vec::new();
+        let mut data_dict: Vec<HashMap<Vec<String>, Vec<ChunkdictChunkInfo>>> = Vec::new();
 
         let train_percentage = 0.7;
         let (mut train, mut test) = Self::devide_set(&all_chunks_clone, train_percentage)?;
@@ -606,7 +607,7 @@ impl Algorithm<SqliteDatabase> {
 
                 let data_dict = Self::aggregate_chunk(data_cluster)?;
 
-                let all_chunks: HashSet<&Chunk> =
+                let all_chunks: HashSet<&ChunkdictChunkInfo> =
                     data_dict.values().flat_map(|v| v.iter()).collect();
                 let mut total_test_set_size = 0;
 
@@ -625,7 +626,7 @@ impl Algorithm<SqliteDatabase> {
             }
             debug!("test set size is {}", min_test_size);
 
-            let min_chunk_list: Vec<Chunk> = min_data_dict
+            let min_chunk_list: Vec<ChunkdictChunkInfo> = min_data_dict
                 .values()
                 .flat_map(|chunk_list| chunk_list.iter())
                 .cloned()
@@ -651,7 +652,7 @@ impl Algorithm<SqliteDatabase> {
         Ok(data_dict)
     }
 
-    pub fn deduplicate_version(all_chunks: &[Chunk]) -> anyhow::Result<(Versiondic, Imagedic)> {
+    pub fn deduplicate_version(all_chunks: &[ChunkdictChunkInfo]) -> anyhow::Result<(Versiondic, Imagedic)> {
         let train_percentage = 0.7;
         let datadict = Self::deduplicate_image(all_chunks.to_owned())?;
         let (train, test) = Self::devide_set(all_chunks, train_percentage)?;
@@ -663,7 +664,7 @@ impl Algorithm<SqliteDatabase> {
             a.push(i.version_name.clone());
             info!("this is {}", i.version_name.clone());
         }
-        let mut version_datadict: HashMap<String, Vec<Chunk>> = HashMap::new();
+        let mut version_datadict: HashMap<String, Vec<ChunkdictChunkInfo>> = HashMap::new();
         let mut data_point = Self::devide_by_image(&train)?;
 
         let mut threshold = 0.5;
@@ -742,7 +743,7 @@ impl Algorithm<SqliteDatabase> {
 #[derive(Debug)]
 struct DataPoint {
     image_name: String,
-    chunk_list: Vec<Chunk>,
+    chunk_list: Vec<ChunkdictChunkInfo>,
     visited: bool,
     clustered: bool,
     cluster_id: i32,
@@ -823,19 +824,7 @@ impl PartialEq for CustomString {
 
 impl Eq for CustomString {}
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Chunk {
-    image_name: String,
-    version_name: String,
-    chunk_blob_id: String,
-    chunk_digest: String,
-    chunk_compressed_size: u32,
-    chunk_uncompressed_size: u32,
-    chunk_compressed_offset: u64,
-    chunk_uncompressed_offset: u64,
-}
-
-impl Table<Chunk, DatabaseError> for ChunkTable {
+impl Table<ChunkdictChunkInfo, DatabaseError> for ChunkTable {
     fn clear(&self) -> Result<(), DatabaseError> {
         self.conn
             .lock()
@@ -867,7 +856,7 @@ impl Table<Chunk, DatabaseError> for ChunkTable {
         Ok(())
     }
 
-    fn insert(&self, chunk: &Chunk) -> Result<(), DatabaseError> {
+    fn insert(&self, chunk: &ChunkdictChunkInfo) -> Result<(), DatabaseError> {
         self.conn
             .lock()
             .map_err(|e| DatabaseError::PoisonError(e.to_string()))?
@@ -899,7 +888,7 @@ impl Table<Chunk, DatabaseError> for ChunkTable {
         Ok(())
     }
 
-    fn list_all(&self) -> Result<Vec<Chunk>, DatabaseError> {
+    fn list_all(&self) -> Result<Vec<ChunkdictChunkInfo>, DatabaseError> {
         let mut offset = 0;
         let limit: i64 = 100;
         let mut all_chunks = Vec::new();
@@ -917,7 +906,7 @@ impl Table<Chunk, DatabaseError> for ChunkTable {
         Ok(all_chunks)
     }
 
-    fn list_paged(&self, offset: i64, limit: i64) -> Result<Vec<Chunk>, DatabaseError> {
+    fn list_paged(&self, offset: i64, limit: i64) -> Result<Vec<ChunkdictChunkInfo>, DatabaseError> {
         let conn_guard = self
             .conn
             .lock()
@@ -929,7 +918,7 @@ impl Table<Chunk, DatabaseError> for ChunkTable {
                 ORDER BY id LIMIT ?1 OFFSET ?2",
             )?;
         let chunk_iterator = stmt.query_map(params![limit, offset], |row| {
-            Ok(Chunk {
+            Ok(ChunkdictChunkInfo {
                 image_name: row.get(1)?,
                 version_name: row.get(2)?,
                 chunk_blob_id: row.get(3)?,
@@ -1093,7 +1082,7 @@ mod tests {
     fn test_chunk_table() -> Result<(), Box<dyn std::error::Error>> {
         let chunk_table = ChunkTable::new_in_memory()?;
         chunk_table.create()?;
-        let chunk = Chunk {
+        let chunk = ChunkdictChunkInfo {
             image_name: "REDIS".to_string(),
             version_name: "1.0.0".to_string(),
             chunk_blob_id: "BLOB123".to_string(),
@@ -1152,7 +1141,7 @@ mod tests {
         chunk_table.create()?;
         for i in 0..200 {
             let i64 = i as u64;
-            let chunk = Chunk {
+            let chunk = ChunkdictChunkInfo {
                 image_name: format!("REDIS{}", i),
                 version_name: format!("1.0.0{}", i),
                 chunk_blob_id: format!("BLOB{}", i),
@@ -1180,10 +1169,10 @@ mod tests {
     #[test]
     fn test_algorithm_exponential_smoothing() -> Result<(), Box<dyn std::error::Error>> {
         let threshold = 0.1;
-        let mut all_chunk: Vec<Chunk> = Vec::new();
+        let mut all_chunk: Vec<ChunkdictChunkInfo> = Vec::new();
         for i in 0..199 {
             let i64 = i as u64;
-            let chunk = Chunk {
+            let chunk = ChunkdictChunkInfo {
                 image_name: format!("REDIS{}", 0),
                 version_name: format!("1.0.0{}", (i + 1) / 100),
                 chunk_blob_id: format!("BLOB{}", i),
@@ -1215,7 +1204,7 @@ mod tests {
         chunk_table.create()?;
         for i in 0..200 {
             let i64 = i as u64;
-            let chunk = Chunk {
+            let chunk = ChunkdictChunkInfo {
                 image_name: format!("REDIS{}", i / 50),
                 version_name: format!("1.0.0{}", (i + 1) / 100),
                 chunk_blob_id: format!("BLOB{}", i),
@@ -1241,10 +1230,10 @@ mod tests {
 
     #[test]
     fn test_distance() -> Result<(), Box<dyn std::error::Error>> {
-        let mut all_chunks1: Vec<Chunk> = Vec::new();
+        let mut all_chunks1: Vec<ChunkdictChunkInfo> = Vec::new();
         for i in 0..200 {
             let i64 = i as u64;
-            let chunk = Chunk {
+            let chunk = ChunkdictChunkInfo {
                 image_name: format!("REDIS{}", 0),
                 version_name: format!("1.0.0{}", (i + 1) / 100),
                 chunk_blob_id: format!("BLOB{}", i),
@@ -1256,10 +1245,10 @@ mod tests {
             };
             all_chunks1.push(chunk);
         }
-        let mut all_chunks2: Vec<Chunk> = Vec::new();
+        let mut all_chunks2: Vec<ChunkdictChunkInfo> = Vec::new();
         for i in 0..200 {
             let i64 = i as u64;
-            let chunk = Chunk {
+            let chunk = ChunkdictChunkInfo {
                 image_name: format!("REDIS{}", 1),
                 version_name: format!("1.0.0{}", (i + 1) / 100),
                 chunk_blob_id: format!("BLOB{}", i),
@@ -1284,10 +1273,10 @@ mod tests {
 
     #[test]
     fn test_devide_set() -> Result<(), Box<dyn std::error::Error>> {
-        let mut all_chunks: Vec<Chunk> = Vec::new();
+        let mut all_chunks: Vec<ChunkdictChunkInfo> = Vec::new();
         for i in 0..200 {
             for j in 0..100 {
-                let chunk = Chunk {
+                let chunk = ChunkdictChunkInfo {
                     image_name: format!("REDIS{}", i),
                     version_name: format!("1.0.0{}", j / 10),
                     chunk_blob_id: format!("BLOB{}", j),
@@ -1313,11 +1302,11 @@ mod tests {
 
     #[test]
     fn test_dbscan() -> Result<(), Box<dyn std::error::Error>> {
-        let mut all_chunks: Vec<Chunk> = Vec::new();
+        let mut all_chunks: Vec<ChunkdictChunkInfo> = Vec::new();
         let radius = 0.6;
         for i in 0..200 {
             for j in 0..100 {
-                let chunk = Chunk {
+                let chunk = ChunkdictChunkInfo {
                     image_name: format!("REDIS{}", i),
                     version_name: format!("1.0.0{}", j / 10),
                     chunk_blob_id: format!("BLOB{}", j),
@@ -1348,11 +1337,11 @@ mod tests {
 
     #[test]
     fn test_aggregate_chunk() -> Result<(), Box<dyn std::error::Error>> {
-        let mut all_chunks: Vec<Chunk> = Vec::new();
+        let mut all_chunks: Vec<ChunkdictChunkInfo> = Vec::new();
         let radius = 0.6;
         for i in 0..200 {
             for j in 0..100 {
-                let chunk = Chunk {
+                let chunk = ChunkdictChunkInfo {
                     image_name: format!("REDIS{}", i),
                     version_name: format!("1.0.0{}", (j + 1) / 100),
                     chunk_blob_id: format!("BLOB{}", j),
@@ -1375,10 +1364,10 @@ mod tests {
 
     #[test]
     fn test_deduplicate_image() -> Result<(), Box<dyn std::error::Error>> {
-        let mut all_chunks: Vec<Chunk> = Vec::new();
+        let mut all_chunks: Vec<ChunkdictChunkInfo> = Vec::new();
         for i in 0..200 {
             for j in 0..100 {
-                let chunk = Chunk {
+                let chunk = ChunkdictChunkInfo {
                     image_name: format!("REDIS{}", i),
                     version_name: format!("1.0.0{}", j / 10),
                     chunk_blob_id: format!("BLOB{}", j),
@@ -1410,11 +1399,11 @@ mod tests {
 
     #[test]
     fn test_deduplicate_version() -> Result<(), Box<dyn std::error::Error>> {
-        let mut all_chunks: Vec<Chunk> = Vec::new();
-        let mut chunkdict: Vec<Chunk> = Vec::new();
+        let mut all_chunks: Vec<ChunkdictChunkInfo> = Vec::new();
+        let mut chunkdict: Vec<ChunkdictChunkInfo> = Vec::new();
         for i in 0..200 {
             let i64 = i as u64;
-            let chunk = Chunk {
+            let chunk = ChunkdictChunkInfo {
                 image_name: format!("REDIS{}", 0),
                 version_name: format!("1.0.0{}", (i + 1) / 20),
                 chunk_blob_id: format!("BLOB{}", i),
