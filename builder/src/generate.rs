@@ -12,9 +12,12 @@ use nydus_rafs::metadata::chunk::ChunkWrapper;
 use nydus_rafs::metadata::inode::InodeWrapper;
 use nydus_rafs::metadata::layout::RafsXAttrs;
 use nydus_rafs::metadata::RafsVersion;
+use nydus_storage::meta::BlobChunkInfoV1Ondisk;
 use nydus_utils::digest::{Algorithm, RafsDigest};
 use nydus_utils::lazy_drop;
+use std::collections::HashMap;
 use std::ffi::OsString;
+use std::mem::size_of;
 use std::path::PathBuf;
 use std::sync::Arc;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -65,6 +68,8 @@ impl Generater {
         blob_mgr: &mut BlobManager,
         chunkdict: Vec<ChunkdictChunkInfo>,
     ) -> Result<BuildOutput> {
+        let blob_id_map = Self::group_by_blob_id(&chunkdict);
+
         // build root tree
         let mut tree = Self::build_root_tree()?;
 
@@ -89,6 +94,15 @@ impl Generater {
         if let Some((_, blob_ctx)) = blob_mgr.get_current_blob() {
             if blob_ctx.blob_id.is_empty() {
                 blob_ctx.blob_id = chunkdict[0].chunk_blob_id.clone();
+                blob_ctx.uncompressed_blob_size = blob_id_map[&chunkdict[0].chunk_blob_id]
+                    .iter()
+                    .map(|chunk| chunk.chunk_uncompressed_size as u64)
+                    .sum();
+                blob_ctx.blob_meta_header.set_ci_uncompressed_size(
+                    (blob_id_map[&chunkdict[0].chunk_blob_id].len()
+                        * size_of::<BlobChunkInfoV1Ondisk>()) as u64,
+                );
+                print!("blob_ctx.blob_id: {}", blob_ctx.blob_id);
             }
         }
 
@@ -113,6 +127,7 @@ impl Generater {
         inode.set_nlink(1);
         inode.set_name_size("/".len());
         inode.set_rdev(0);
+        inode.set_blocks(256);
         let node_info = NodeInfo {
             explicit_uidgid: true,
             src_dev: 66305,
@@ -144,9 +159,11 @@ impl Generater {
         inode.set_gid(1000);
         inode.set_projid(0);
         inode.set_mode(33204);
+        inode.set_size(10 as u64);
         inode.set_nlink(1);
         inode.set_name_size("chunkdict".len());
         inode.set_rdev(0);
+        inode.set_blocks(256);
         let node_info = NodeInfo {
             explicit_uidgid: true,
             src_dev: 66305,
@@ -207,5 +224,17 @@ impl Generater {
             });
         }
         Ok(())
+    }
+
+    pub fn group_by_blob_id(chunkdict: &[ChunkdictChunkInfo]) -> HashMap<String, Vec<ChunkdictChunkInfo>> {
+        let mut blob_id_map: HashMap<String, Vec<ChunkdictChunkInfo>> = HashMap::new();
+    
+        for chunk_info in chunkdict {
+            // 要注意是否需要存储对象
+            let entry = blob_id_map.entry(chunk_info.chunk_blob_id.clone()).or_insert_with(Vec::new);
+            entry.push(chunk_info.clone());
+        }
+    
+        blob_id_map
     }
 }
