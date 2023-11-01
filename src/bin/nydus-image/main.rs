@@ -483,6 +483,12 @@ fn prepare_cmd_args(bti_string: &'static str) -> App {
                                 .action(ArgAction::SetTrue)
                                 .required(false),
                         )
+                        .arg(
+                            Arg::new("features")
+                                .long("features")
+                                .value_parser(["blob-toc"])
+                                .help("Enable/disable features")
+                        )
                     )
                 .subcommand(
                     App::new("dump")
