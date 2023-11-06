@@ -1474,7 +1474,7 @@ impl Command {
                 image_name: String::from("redis"),
                 version_name: String::from("nydus_7.0.2"),
                 chunk_blob_id: String::from(
-                    "73483061f74471da1b80947688b92bf0fd853e8456a6d662829cf7ec88785e8d",
+                    "73483061f74471da1b80947688b92bf0fd853e8456a6d662829cf7ec88785e8a",
                 ),
                 chunk_digest: String::from(
                     "00047517875f3cd8a471ae956f654015c719f6d52220a5745da30c2eea48d33a",
@@ -1488,7 +1488,7 @@ impl Command {
                 image_name: String::from("redis"),
                 version_name: String::from("nydus_7.0.2"),
                 chunk_blob_id: String::from(
-                    "73483061f74471da1b80947688b92bf0fd853e8456a6d662829cf7ec88785e8d",
+                    "73483061f74471da1b80947688b92bf0fd853e8456a6d662829cf7ec88785e8a",
                 ),
                 chunk_digest: String::from(
                     "00096459293ffff2f057815589f662f51d85b9bfc111d34f465a31290cf6a785",
@@ -1502,7 +1502,7 @@ impl Command {
                 image_name: String::from("redis"),
                 version_name: String::from("nydus_7.0.2"),
                 chunk_blob_id: String::from(
-                    "73483061f74471da1b80947688b92bf0fd853e8456a6d662829cf7ec88785e8d",
+                    "73483061f74471da1b80947688b92bf0fd853e8456a6d662829cf7ec88785e8a",
                 ),
                 chunk_digest: String::from(
                     "003dfa491feb4729728dba4024bec506eb035d28fd9943b3ff696033cc5413b0",
