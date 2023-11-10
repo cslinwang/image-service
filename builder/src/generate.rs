@@ -158,9 +158,9 @@ impl Generater {
         inode.set_gid(1000);
         inode.set_projid(0);
         inode.set_mode(33204);
-        inode.set_size(10 as u64);
+        inode.set_size(3 as u64);
         inode.set_nlink(1);
-        inode.set_name_size("chunkdict".len());
+        inode.set_name_size("chunkdict1".len());
         inode.set_rdev(0);
         inode.set_blocks(256);
         let node_info = NodeInfo {
@@ -169,9 +169,9 @@ impl Generater {
             src_ino: 24775126,
             rdev: 0,
             source: PathBuf::from("/"),
-            path: PathBuf::from("/chunkdict"),
-            target: PathBuf::from("/chunkdict"),
-            target_vec: vec![OsString::from("/"), OsString::from("/chunkdict")],
+            path: PathBuf::from("/chunkdict1"),
+            target: PathBuf::from("/chunkdict1"),
+            target_vec: vec![OsString::from("/"), OsString::from("/chunkdict1")],
             symlink: None,
             xattrs: RafsXAttrs::new(),
             v6_force_extended_inode: true,
