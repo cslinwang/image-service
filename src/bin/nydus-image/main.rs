@@ -1504,13 +1504,16 @@ impl Command {
         }
 
         // 临时测试
+        let mut verbose = matches.get_flag("verbose");
+        if !verbose {
+            verbose = true;
+        }
         let chunkdict_bootstrap_path_tmp = chunkdict_bootstrap_path.clone();
         let bootstrap_path = match &chunkdict_bootstrap_path_tmp {
             ArtifactStorage::SingleFile(path_buf) => path_buf.as_path(),
             ArtifactStorage::FileDir(path_buf) => path_buf.as_path(),
         };
-        let verbose = matches.get_flag("verbose");
-
+        
         let config = Self::get_configuration(matches)?;
         let demo_booststrap_path = Path::new("/home/runner/bootstrap");
         let mut demo_validator = Validator::new(demo_booststrap_path, config)?;
