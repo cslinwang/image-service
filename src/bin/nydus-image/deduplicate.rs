@@ -60,6 +60,9 @@ pub trait Database {
     /// Retrieves all chunk information from the database.
     fn get_chunks(&self) -> Result<Vec<ChunkdictChunkInfo>>;
 
+    /// Retrieves all chunk information from the database filtered by blob ID.
+    fn get_chunks_by_blob_id(&self,blob_id: &str) -> Result<Vec<ChunkdictChunkInfo>>;
+
     /// Retrieves all blob information from the database.
     fn get_blobs(&self) -> Result<Vec<Blob>>;
 }
@@ -121,6 +124,10 @@ impl Database for SqliteDatabase {
 
     fn get_chunks(&self) -> Result<Vec<ChunkdictChunkInfo>> {
         ChunkTable::list_all(&self.chunk_table).context("Failed to get chunks")
+    }
+
+    fn get_chunks_by_blob_id(&self,blob_id: &str) -> Result<Vec<ChunkdictChunkInfo>> {
+        ChunkTable::list_all_by_blob_id(&self.chunk_table, blob_id).context("Failed to get chunks")
     }
 
     fn get_blobs(&self) -> Result<Vec<Blob>> {
@@ -767,6 +774,7 @@ where
 
     /// select data with offset and limit.
     fn list_paged(&self, offset: i64, limit: i64) -> Result<Vec<T>, Err>;
+
 }
 
 #[derive()]
@@ -788,6 +796,59 @@ impl ChunkTable {
             conn: Arc::new(Mutex::new(conn)),
         })
     }
+
+    /// select all data filtered by blob ID.
+    fn list_all_by_blob_id(&self, blob_id: &str) -> Result<Vec<ChunkdictChunkInfo>, DatabaseError> {
+        let mut offset = 0;
+        let limit: i64 = 100;
+        let mut all_chunks_by_blob_id = Vec::new();
+    
+        loop {
+            let chunks = self.list_paged_by_blob_id(blob_id, offset, limit)?;
+            if chunks.is_empty() {
+                break;
+            }
+    
+            all_chunks_by_blob_id.extend(chunks);
+            offset += limit;
+        }
+    
+        Ok(all_chunks_by_blob_id)
+    }
+
+    /// select data with offset and limit filtered by blob ID.
+    fn list_paged_by_blob_id(&self, blob_id: &str, offset: i64, limit: i64) -> Result<Vec<ChunkdictChunkInfo>, DatabaseError> {
+        let conn_guard = self
+            .conn
+            .lock()
+            .map_err(|e| DatabaseError::PoisonError(e.to_string()))?;
+        let mut stmt: rusqlite::Statement<'_> = conn_guard
+            .prepare(
+                "SELECT id, image_name, version_name, chunk_blob_id, chunk_digest, chunk_compressed_size,
+                chunk_uncompressed_size, chunk_compressed_offset, chunk_uncompressed_offset from chunk
+                WHERE chunk_blob_id = ?1
+                ORDER BY id LIMIT ?2 OFFSET ?3",
+            )?;
+        let chunk_iterator = stmt.query_map(params![blob_id, limit, offset], |row| {
+            Ok(ChunkdictChunkInfo {
+                image_name: row.get(1)?,
+                version_name: row.get(2)?,
+                chunk_blob_id: row.get(3)?,
+                chunk_digest: row.get(4)?,
+                chunk_compressed_size: row.get(5)?,
+                chunk_uncompressed_size: row.get(6)?,
+                chunk_compressed_offset: row.get(7)?,
+                chunk_uncompressed_offset: row.get(8)?,
+            })
+        })?;
+        let mut chunks = Vec::new();
+        for chunk in chunk_iterator {
+            chunks.push(chunk.map_err(DatabaseError::SqliteError)?);
+        }
+        Ok(chunks)
+    }
+
+    
 }
 
 #[derive(Debug, Clone)]
@@ -935,6 +996,7 @@ impl Table<ChunkdictChunkInfo, DatabaseError> for ChunkTable {
         }
         Ok(chunks)
     }
+    
 }
 
 #[derive(Debug)]
@@ -1093,10 +1155,21 @@ mod tests {
             chunk_uncompressed_offset: 0,
         };
         chunk_table.insert(&chunk)?;
+        let chunk2 = ChunkdictChunkInfo {
+            image_name: "REDIS".to_string(),
+            version_name: "1.0.0".to_string(),
+            chunk_blob_id: "BLOB456".to_string(),
+            chunk_digest: "DIGEST123".to_string(),
+            chunk_compressed_size: 512,
+            chunk_uncompressed_size: 1024,
+            chunk_compressed_offset: 0,
+            chunk_uncompressed_offset: 0,
+        };
+        chunk_table.insert(&chunk2)?;
         let chunks = chunk_table.list_all()?;
         assert_eq!(chunks[0].image_name, chunk.image_name);
         assert_eq!(chunks[0].version_name, chunk.version_name);
-        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks.len(), 2);
         assert_eq!(chunks[0].chunk_blob_id, chunk.chunk_blob_id);
         assert_eq!(chunks[0].chunk_digest, chunk.chunk_digest);
         assert_eq!(chunks[0].chunk_compressed_size, chunk.chunk_compressed_size);
@@ -1112,6 +1185,11 @@ mod tests {
             chunks[0].chunk_uncompressed_offset,
             chunk.chunk_uncompressed_offset
         );
+        
+        let chunks = chunk_table.list_all_by_blob_id(&chunk.chunk_blob_id)?;
+        assert_eq!(chunks[0].chunk_blob_id, chunk.chunk_blob_id);
+        assert_eq!(chunks.len(), 1);
+
         Ok(())
     }
 
