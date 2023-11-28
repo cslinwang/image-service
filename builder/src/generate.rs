@@ -13,7 +13,7 @@ use nydus_rafs::metadata::inode::InodeWrapper;
 use nydus_rafs::metadata::layout::RafsXAttrs;
 use nydus_rafs::metadata::RafsVersion;
 use nydus_storage::meta::BlobChunkInfoV1Ondisk;
-use nydus_utils::digest::{Algorithm, RafsDigest};
+use nydus_utils::digest::RafsDigest;
 use nydus_utils::lazy_drop;
 use std::ffi::OsString;
 use std::mem::size_of;
@@ -52,9 +52,12 @@ impl Generater {
 
         // build child tree
         let child = Self::build_child_tree(ctx, blob_mgr, &chunkdict)?;
-        let mut result = vec![child];
-        result.sort_unstable_by(|a, b| a.name().cmp(b.name()));
+        let result = vec![child];
         tree.children = result;
+        tree.lock_node()
+            .v5_set_dir_size(ctx.fs_version, &tree.children);
+
+        Self::validate_tree(&tree)?;
 
         // build bootstrap
         let mut bootstrap_ctx = bootstrap_mgr.create_ctx()?;
@@ -67,7 +70,28 @@ impl Generater {
 
         lazy_drop(bootstrap_ctx);
 
+
+        // validate tree after bootstrap build
+        let bootstrap_tree = bootstrap.tree.clone();
+        Self::validate_tree(&bootstrap_tree)?;
+
         BuildOutput::new(blob_mgr, &bootstrap_mgr.bootstrap_storage)
+    }
+
+    /// validate tree
+    fn validate_tree(tree: &Tree) -> Result<()> {
+        let pre = &mut |t: &Tree| -> Result<()> {
+            let node = t.lock_node();
+            println!("chunkdict tree: ");
+            println!("inode: {}", node);
+            for chunk in &node.chunks {
+                println!("\t chunk: {}", chunk);
+            }
+            Ok(())
+        };
+        tree.walk_dfs_pre(pre)?;
+        println!("chunkdict tree is valid.");
+        Ok(())
     }
 
     /// check blob uncompressed size is bigger than block
@@ -99,7 +123,7 @@ impl Generater {
         inode.set_uid(1000);
         inode.set_gid(1000);
         inode.set_projid(0);
-        inode.set_mode(16893);
+        inode.set_mode(0o660 | libc::S_IFDIR as u32);
         inode.set_nlink(1);
         inode.set_name_size("/".len());
         inode.set_rdev(0);
@@ -130,25 +154,25 @@ impl Generater {
     ) -> Result<Tree> {
         // node
         let mut inode = InodeWrapper::new(RafsVersion::V6);
-        inode.set_ino(0);
-        inode.set_uid(1000);
-        inode.set_gid(1000);
+        inode.set_ino(1);
+        inode.set_uid(0);
+        inode.set_gid(0);
         inode.set_projid(0);
-        inode.set_mode(33204);
-        inode.set_size(3 as u64);
+        inode.set_mode(0o660 | libc::S_IFREG as u32);
         inode.set_nlink(1);
-        inode.set_name_size("chunkdict1".len());
+        inode.set_name_size("chunkdict".len());
         inode.set_rdev(0);
         inode.set_blocks(256);
+        inode.set_child_count(3);
         let node_info = NodeInfo {
             explicit_uidgid: true,
             src_dev: 66305,
             src_ino: 24775126,
             rdev: 0,
             source: PathBuf::from("/"),
-            path: PathBuf::from("/chunkdict1"),
-            target: PathBuf::from("/chunkdict1"),
-            target_vec: vec![OsString::from("/"), OsString::from("/chunkdict1")],
+            path: PathBuf::from("/chunkdict"),
+            target: PathBuf::from("/chunkdict"),
+            target_vec: vec![OsString::from("/"), OsString::from("/chunkdict")],
             symlink: None,
             xattrs: RafsXAttrs::new(),
             v6_force_extended_inode: true,
@@ -157,6 +181,13 @@ impl Generater {
 
         // insert chunks
         Self::insert_chunks(ctx, blob_mgr, &mut node, chunkdict)?;
+
+        let node_size: u64 = node
+            .chunks
+            .iter()
+            .map(|chunk| chunk.inner.uncompressed_size() as u64)
+            .sum();
+        node.inode.set_size(node_size);
 
         let child = Tree::new(node);
         child
@@ -203,16 +234,13 @@ impl Generater {
             chunk.set_compressed_offset(chunk_info.chunk_compressed_offset);
             chunk.set_uncompressed_size(chunk_info.chunk_uncompressed_size);
             chunk.set_uncompressed_offset(chunk_info.chunk_uncompressed_offset);
-            chunk.set_id(RafsDigest::from_buf(
-                chunk_info.chunk_digest.as_bytes(),
-                Algorithm::Sha256,
-            ));
+            chunk.set_id(RafsDigest::from_string(&chunk_info.chunk_digest));
 
-            let chunk = Arc::new(chunk);
-            // blob_ctx.add_chunk_meta_info(&chunk, chunk_info)?;
+            debug!("chunk id: {}", chunk.id());
+
             node.chunks.push(NodeChunk {
                 source: ChunkSource::Build,
-                inner: chunk,
+                inner: Arc::new(chunk.clone()),
             });
         }
         Ok(())

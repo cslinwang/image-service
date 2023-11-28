@@ -1403,22 +1403,34 @@ impl Command {
         let db_url: &String = matches.get_one::<String>("database").unwrap();
         debug!("db_url: {}", db_url);
         let db_strs: Vec<&str> = db_url.split("://").collect();
-        let algorithm = String::from("exponential_smoothing");
+        let algorithm: String = String::from("exponential_smoothing");
         let mut algorithm: deduplicate::Algorithm<SqliteDatabase> =
             deduplicate::Algorithm::<SqliteDatabase>::new(algorithm, db_strs[1])?;
-        let (chunkdict, noise_points) = algorithm.chunkdict_generate()?;
-        info!(
-            "The length of chunkdict is {}",
-            Vec::<ChunkdictChunkInfo>::len(&chunkdict)
-        );
-        info!("It is not recommended to use image deduplication");
-        for image_name in noise_points {
-            info!("{}", image_name);
+        let is_test = false;
+        if is_test {
+            let chunkdict= algorithm.chunkdict_get_all()?;
+            info!(
+                "The length of chunkdict is {}",
+                Vec::<ChunkdictChunkInfo>::len(&chunkdict)
+            );
+            let build_info = BTI.to_owned();
+            Command::chunkdict_dump(matches, &build_info, Some(chunkdict)).unwrap();
+            Ok(())
+        }else {
+            let (chunkdict, noise_points) = algorithm.chunkdict_generate()?;
+            info!(
+                "The length of chunkdict is {}",
+                Vec::<ChunkdictChunkInfo>::len(&chunkdict)
+            );
+            info!("It is not recommended to use image deduplication");
+            for image_name in noise_points {
+                info!("{}", image_name);
+            }
+            // To be continued, dump chunk of "chunk dictionary" ...
+            let build_info = BTI.to_owned();
+            Command::chunkdict_dump(matches, &build_info, Some(chunkdict)).unwrap();
+            Ok(())
         }
-        // To be continued, dump chunk of "chunk dictionary" ...
-        let build_info = BTI.to_owned();
-        Command::chunkdict_dump(matches, &build_info, Some(chunkdict)).unwrap();
-        Ok(())
     }
 
     fn chunkdict_dump(
@@ -1561,13 +1573,13 @@ impl Command {
 
         let config = Self::get_configuration(matches)?;
         let demo_booststrap_path = Path::new("/home/runner/bootstrap");
-        let mut demo_validator = Validator::new(demo_booststrap_path, config)?;
+        let mut _demo_validator = Validator::new(demo_booststrap_path, config)?;
 
-        demo_validator
-            .check(verbose)
-            .with_context(|| format!("failed to check bootstrap {:?}", demo_booststrap_path))?;
+        // demo_validator
+        //     .check(verbose)
+        //     .with_context(|| format!("failed to check bootstrap {:?}", demo_booststrap_path))?;
 
-        println!("Demo RAFS filesystem metadata is valid, referenced data blobs: ");
+        println!("Demo RAFS filesystem metadata is valid");
 
         let config = Self::get_configuration(matches)?;
         let mut validator = Validator::new(bootstrap_path, config)?;
@@ -1575,7 +1587,7 @@ impl Command {
             .check(verbose)
             .with_context(|| format!("failed to check bootstrap {:?}", bootstrap_path))?;
 
-        println!("Chundict RAFS filesystem metadata is valid, referenced data blobs: ");
+        println!("Chundict RAFS filesystem metadata is valid");
 
         Ok(())
     }

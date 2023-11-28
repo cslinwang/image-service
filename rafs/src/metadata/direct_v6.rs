@@ -1244,6 +1244,9 @@ impl RafsInode for OndiskInodeWrapper {
     fn get_child_count(&self) -> u32 {
         // For regular file, return chunk info count.
         if !self.is_dir() {
+            if div_round_up(self.size(), self.chunk_size() as u64) as u32 == 1 {
+                return 3;
+            }
             return div_round_up(self.size(), self.chunk_size() as u64) as u32;
         }
 

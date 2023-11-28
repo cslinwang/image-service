@@ -238,6 +238,11 @@ impl Algorithm<SqliteDatabase> {
         Ok(Self { algorithm_name, db })
     }
 
+    /// Get all Chunks
+    pub fn chunkdict_get_all(&mut self) -> anyhow::Result<Vec<ChunkdictChunkInfo>> {
+        self.db.get_chunks()
+    }
+
     // Call the algorithm to generate a dictionary
     pub fn chunkdict_generate(&mut self) -> anyhow::Result<(Vec<ChunkdictChunkInfo>, Vec<String>)> {
         let all_chunks = self.db.chunk_table.list_all()?;
