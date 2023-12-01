@@ -374,43 +374,6 @@ fn prepare_cmd_args(bti_string: &'static str) -> App {
             App::new("chunkdict")
                 .about("deduplicate RAFS filesystem metadata")
                 .subcommand(
-                    App::new("save")
-                        .about("Save chunk info to a database")
-                        .arg(
-                            Arg::new("bootstrap")
-                            .short('B')
-                            .long("bootstrap")
-                            .help("File path of RAFS meta blob/bootstrap, e.g. /path/output/localhost:5000:redis:nydus_7.0.1/nydus_bootstrap")
-                            .required(false),
-                        )
-                    .arg(
-                        Arg::new("database")
-                            .long("database")
-                            .help("Database connection URI for assisting chunk dict generation, e.g. sqlite:///path/chunkdict.db")
-                            .default_value("sqlite:///home/runner/work/image-service/chunkdict/image-service/contrib/nydusify/chunkdict.db")
-                            .required(false),
-                    )
-                    .arg(
-                        Arg::new("blob-dir")
-                            .long("blob-dir")
-                            .short('D')
-                            .conflicts_with("config")
-                            .help(
-                                "Directory for localfs storage backend, hosting data blobs and cache files",
-                            ),
-                    )
-                    .arg(arg_config.clone())
-                    .arg(
-                        Arg::new("verbose")
-                            .long("verbose")
-                            .short('v')
-                            .help("Output message in verbose mode")
-                            .action(ArgAction::SetTrue)
-                            .required(false),
-                    )
-                    .arg(arg_output_json.clone())
-                )
-                .subcommand(
                     App::new("generate")
                         .about("generate chunk dictionary based on database")
                         .arg(
@@ -854,7 +817,6 @@ fn main() -> Result<()> {
         Command::create(matches, &build_info)
     } else if let Some(matches) = cmd.subcommand_matches("chunkdict") {
         match matches.subcommand_name() {
-            Some("save") => Command::chunkdict_save(matches.subcommand_matches("save").unwrap()),
             Some("generate") => Command::chunkdict_generate(
                 matches.subcommand_matches("generate").unwrap(),
                 &build_info,
@@ -1275,54 +1237,6 @@ impl Command {
         event_tracer!("egid", "{}", getegid());
         info!("successfully built RAFS filesystem: \n{}", build_output);
         OutputSerializer::dump(matches, build_output, build_info)
-    }
-
-    fn chunkdict_save(matches: &ArgMatches) -> Result<()> {
-        // Parse the directory name of bootstrap and obtain the image name and version name
-        let bootstrap_path = Self::get_bootstrap(matches)?;
-        let path = bootstrap_path.display().to_string();
-        info!("Bootstrap path is {}", path);
-        let path_name: Vec<&str> = path.split('/').collect();
-
-        // Extract the image name and version  name from the bootstrap directory
-        let bootstrap_dir = match path_name.get(path_name.len() - 2) {
-            Some(&bootstrap_dir) => bootstrap_dir.to_string(),
-            None => bail!("Invalid Bootstrap directory name"),
-        };
-        let full_image_name: Vec<&str> = bootstrap_dir.split(':').collect();
-        let image_name = match full_image_name.get(full_image_name.len() - 2) {
-            Some(&second_last) => second_last.to_string(),
-            None => bail!("Invalid image name"),
-        };
-        let version_name = match full_image_name.last() {
-            Some(&last) => last.to_string(),
-            None => bail!("Invalid version name"),
-        };
-
-        let config = Self::get_configuration(matches)?;
-        let db_url: &String = matches.get_one::<String>("database").unwrap();
-
-        // For backward compatibility with v2.1.
-        config
-            .internal
-            .set_blob_accessible(matches.get_one::<String>("bootstrap").is_none());
-        let db_strs: Vec<&str> = db_url.split("://").collect();
-        if db_strs.len() != 2 || (!db_strs[1].starts_with('/') && !db_strs[1].starts_with(':')) {
-            bail!("Invalid database URL: {}", db_url);
-        }
-
-        match db_strs[0] {
-            "sqlite" => {
-                let mut deduplicate: Deduplicate<SqliteDatabase> =
-                    Deduplicate::<SqliteDatabase>::new(db_strs[1])?;
-                deduplicate.save_metadata(bootstrap_path, config, image_name, version_name)?
-            }
-            _ => {
-                bail!("Unsupported database type: {}, please use a valid database URI, such as 'sqlite:///path/to/chunkdict.db'.", db_strs[0])
-            }
-        };
-        info!("Chunkdict metadata is saved at: {:?}", db_url);
-        Ok(())
     }
 
     fn chunkdict_generate(matches: &ArgMatches, build_info: &BuildTimeInfo) -> Result<()> {

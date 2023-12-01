@@ -59,72 +59,60 @@ func New(opt Opt) (*Generator, error) {
 
 // Generate saves multiple Nydus bootstraps into the database one by one.
 func (generator *Generator) Generate(ctx context.Context) error {
-	for index := range generator.Sources {
-		if err := generator.save(ctx, index); err != nil {
-			if utils.RetryWithHTTP(err) {
+	var bootstrapSlice []string
+	if err := generator.pull(ctx, &bootstrapSlice); err != nil {
+		if utils.RetryWithHTTP(err) {
+			for index := range generator.Sources {
 				generator.sourcesParser[index].Remote.MaybeWithHTTP(err)
 			}
-			if err := generator.save(ctx, index); err != nil {
-				return err
-			}
+		}
+		if err := generator.pull(ctx, &bootstrapSlice); err != nil {
+			return err
 		}
 	}
-	if err := generator.deduplicating(ctx); err != nil {
+
+	if err := generator.generate(ctx, bootstrapSlice); err != nil {
 		return err
 	}
 	return nil
 }
 
-// "save" stores information of chunk and blob of a Nydus Image in the database
-func (generator *Generator) save(ctx context.Context, index int) error {
-	currentDir, _ := os.Getwd()
-	sourceParsed, err := generator.sourcesParser[index].Parse(ctx)
-	if err != nil {
-		return errors.Wrap(err, "parse Nydus image")
+func (generator *Generator) pull(ctx context.Context, bootstrapSlice *[]string) error {
+	for index := range generator.Sources {
+		sourceParsed, err := generator.sourcesParser[index].Parse(ctx)
+		if err != nil {
+			return errors.Wrap(err, "parse Nydus image")
+		}
+
+		// Create a directory to store the image bootstrap
+		nydusImageName := strings.Replace(generator.Sources[index], "/", ":", -1)
+		bootstrapFolderPath := filepath.Join(generator.WorkDir, nydusImageName)
+		if err := os.MkdirAll(bootstrapFolderPath, fs.ModePerm); err != nil {
+			return errors.Wrap(err, "creat work directory")
+		}
+		if err := generator.Output(ctx, sourceParsed, bootstrapFolderPath, index); err != nil {
+			return errors.Wrap(err, "output image information")
+		}
+		bootstrapPath := filepath.Join(bootstrapFolderPath, "nydus_bootstrap")
+		*bootstrapSlice = append(*bootstrapSlice, bootstrapPath)
 	}
-
-	// Create a directory to store the image bootstrap
-	nydusImageName := strings.Replace(generator.Sources[index], "/", ":", -1)
-	bootstrapFolderPath := filepath.Join(currentDir, generator.WorkDir, nydusImageName)
-	if err := os.MkdirAll(bootstrapFolderPath, fs.ModePerm); err != nil {
-		return errors.Wrap(err, "creat work directory")
-	}
-	if err := generator.Output(ctx, sourceParsed, bootstrapFolderPath, index); err != nil {
-		return errors.Wrap(err, "output image information")
-	}
-
-	databaseName := "chunkdict.db"
-	databaseType := "sqlite"
-	DatabasePath := databaseType + "://" + filepath.Join(currentDir, generator.WorkDir, databaseName)
-
-	// Invoke "nydus-image save" command
-	builder := build.NewBuilder(generator.NydusImagePath)
-	if err := builder.Save(build.SaveOption{
-		BootstrapPath: filepath.Join(bootstrapFolderPath, "nydus_bootstrap"),
-		DatabasePath:  DatabasePath,
-	}); err != nil {
-		return errors.Wrap(err, "invalid nydus bootstrap format")
-	}
-
-	logrus.Infof("Saving chunk information from image %s", generator.sourcesParser[index].Remote.Ref)
-
-	// if err := os.RemoveAll(folderPath); err != nil {
-	// 	return errors.Wrap(err, "remove work directory")
-	// }
 	return nil
 }
 
-func (generator *Generator) deduplicating(ctx context.Context) error {
+func (generator *Generator) generate(ctx context.Context, bootstrapSlice []string) error {
+	// Invoke "nydus-image generate" command
 	builder := build.NewBuilder(generator.NydusImagePath)
-	currentDir, _ := os.Getwd()
-
-	databaseName := "chunkdict.db"
 	databaseType := "sqlite"
-	DatabasePath := databaseType + "://" + filepath.Join(currentDir, generator.WorkDir, databaseName)
 	if err := builder.Generate(build.GenerateOption{
-		DatabasePath: DatabasePath,
+		BootstrapSlice:     bootstrapSlice,
+		MergeBootstrapPath: filepath.Join(generator.WorkDir, "merge_bootstrap"),
+		DatabasePath:       databaseType + "://" + filepath.Join(generator.WorkDir, "database.db"),
+		OutputPath:         filepath.Join(generator.WorkDir, "nydus_bootstrap_output.json"),
 	}); err != nil {
 		return errors.Wrap(err, "invalid nydus bootstrap format")
 	}
+
+	logrus.Infof("Successfully generate image chunk dictionary")
+
 	return nil
 }
