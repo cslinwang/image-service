@@ -1819,6 +1819,7 @@ impl RafsV6BlobTable {
         blob_toc_digest: [u8; 32],
         blob_meta_size: u64,
         blob_toc_size: u32,
+        is_chunkdict: bool,
         header: BlobCompressionContextHeader,
         cipher_object: Arc<Cipher>,
         cipher_context: Option<CipherContext>,
@@ -1850,6 +1851,9 @@ impl RafsV6BlobTable {
         blob_info.set_blob_meta_size(blob_meta_size);
         blob_info.set_blob_toc_size(blob_toc_size);
         blob_info.set_cipher_info(flags.into(), cipher_object, cipher_context);
+        if is_chunkdict {
+            blob_info.set_chunkdict_generated(true);
+        }
 
         self.entries.push(Arc::new(blob_info));
 

@@ -1120,6 +1120,7 @@ impl BlobManager {
                         compressed_blob_size,
                         blob_features,
                         flags,
+                        build_ctx.is_chunkdict_generated,
                     );
                 }
                 RafsBlobTable::V6(table) => {
@@ -1139,6 +1140,7 @@ impl BlobManager {
                         ctx.blob_toc_digest,
                         ctx.blob_meta_size,
                         ctx.blob_toc_size,
+                        build_ctx.is_chunkdict_generated,
                         ctx.blob_meta_header,
                         ctx.cipher_object.clone(),
                         ctx.cipher_ctx.clone(),
@@ -1316,6 +1318,9 @@ pub struct BuildContext {
     pub configuration: Arc<ConfigV2>,
     /// Generate the blob cache and blob meta
     pub blob_cache_generator: Option<BlobCacheGenerator>,
+
+    /// Whether is chunkdict.
+    pub is_chunkdict_generated: bool,
 }
 
 impl BuildContext {
@@ -1384,6 +1389,7 @@ impl BuildContext {
             features,
             configuration: Arc::new(ConfigV2::default()),
             blob_cache_generator: None,
+            is_chunkdict_generated: false,
         }
     }
 
@@ -1401,6 +1407,10 @@ impl BuildContext {
 
     pub fn set_configuration(&mut self, config: Arc<ConfigV2>) {
         self.configuration = config;
+    }
+
+    pub fn set_is_chunkdict(&mut self, is_chunkdict: bool) {
+        self.is_chunkdict_generated = is_chunkdict;
     }
 }
 
@@ -1434,6 +1444,7 @@ impl Default for BuildContext {
             features: Features::new(),
             configuration: Arc::new(ConfigV2::default()),
             blob_cache_generator: None,
+            is_chunkdict_generated: false,
         }
     }
 }

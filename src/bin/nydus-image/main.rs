@@ -1314,6 +1314,7 @@ impl Command {
         // Build_ctx.blob_features.insert(BlobFeatures::CHUNK_INFO_V2);
         // Build_ctx.blob_features.insert(BlobFeatures::ENCRYPTED);
         build_ctx.features = features;
+        build_ctx.is_chunkdict_generated = true;
 
         let digester = matches
             .get_one::<String>("digester")
@@ -1325,6 +1326,99 @@ impl Command {
         let bootstrap_path = Self::get_bootstrap_storage(matches)?;
         let mut bootstrap_mgr = BootstrapManager::new(Some(bootstrap_path), None);
 
+        let mut chunkdic_tmp = Vec::new();
+        chunkdic_tmp.push(ChunkdictChunkInfo {
+            image_reference: String::from("redis"),
+            version: String::from("nydus_7.0.2"),
+            chunk_blob_id: String::from(
+                "73483061f74471da1b80947688b92bf0fd853e8456a6d662829cf7ec88785e8a",
+            ),
+            chunk_digest: String::from(
+                "00047517875f3cd8a471ae956f654015c719f6d52220a5745da30c2eea48d33a",
+            ),
+            chunk_compressed_size: 779,
+            chunk_uncompressed_size: 1738,
+            chunk_compressed_offset: 30597831,
+            chunk_uncompressed_offset: 75816960,
+        });
+        chunkdic_tmp.push(ChunkdictChunkInfo {
+            image_reference: String::from("redis"),
+            version: String::from("nydus_7.0.2"),
+            chunk_blob_id: String::from(
+                "73483061f74471da1b80947688b92bf0fd853e8456a6d662829cf7ec88785e8a",
+            ),
+            chunk_digest: String::from(
+                "00096459293ffff2f057815589f662f51d85b9bfc111d34f465a31290cf6a785",
+            ),
+            chunk_compressed_size: 983,
+            chunk_uncompressed_size: 2044,
+            chunk_compressed_offset: 29593326,
+            chunk_uncompressed_offset: 72409088,
+        });
+        chunkdic_tmp.push(ChunkdictChunkInfo {
+            image_reference: String::from("redis"),
+            version: String::from("nydus_7.0.2"),
+            chunk_blob_id: String::from(
+                "73483061f74471da1b80947688b92bf0fd853e8456a6d662829cf7ec88785e8a",
+            ),
+            chunk_digest: String::from(
+                "003dfa491feb4729728dba4024bec506eb035d28fd9943b3ff696033cc5413b0",
+            ),
+            chunk_compressed_size: 5541,
+            chunk_uncompressed_size: 18544,
+            chunk_compressed_offset: 17635022,
+            chunk_uncompressed_offset: 42688512,
+        });
+        chunkdic_tmp.push(ChunkdictChunkInfo {
+            image_reference: String::from("redis"),
+            version: String::from("nydus_7.0.2"),
+            chunk_blob_id: String::from(
+                "73483061f74471da1b80947688b92bf0fd853e8456a6d662829cf7ec88785e8d",
+            ),
+            chunk_digest: String::from(
+                "005848293161638f46cde2b8397f93298fe8184cb35afa4bd81489ac6a74f9c2",
+            ),
+            chunk_compressed_size: 148,
+            chunk_uncompressed_size: 239,
+            chunk_compressed_offset: 14935577,
+            chunk_uncompressed_offset: 36294656,
+        });
+        chunkdic_tmp.push(ChunkdictChunkInfo {
+            image_reference: String::from("redis"),
+            version: String::from("nydus_7.0.2"),
+            chunk_blob_id: String::from(
+                "73483061f74471da1b80947688b92bf0fd853e8456a6d662829cf7ec88785e8d",
+            ),
+            chunk_digest: String::from(
+                "00788bcf621250cf9a71651dd0f8453423a08760770e63f36951d51316c12cb8",
+            ),
+            chunk_compressed_size: 378,
+            chunk_uncompressed_size: 685,
+            chunk_compressed_offset: 2541908,
+            chunk_uncompressed_offset: 554176,
+        });
+        // let output = Generater::generate(
+        //     &mut build_ctx,
+        //     &mut bootstrap_mgr,
+        //     &mut blob_mgr,
+        //     chunkdic_tmp,
+        // )?;
+        if chunkdict.len() == 0 {
+            let output = Generator::generate(
+                &mut build_ctx,
+                &mut bootstrap_mgr,
+                &mut blob_mgr,
+                chunkdic_tmp,
+            )?;
+            OutputSerializer::dump(matches, output, build_info).unwrap();
+            info!(
+                "Chunkdict metadata is saved at: {:?}",
+                matches
+                    .get_one::<String>("bootstrap")
+                    .map(|s| s.as_str())
+                    .unwrap_or_default(),
+            );
+        }
         let output =
             Generator::generate(&mut build_ctx, &mut bootstrap_mgr, &mut blob_mgr, chunkdict)?;
         OutputSerializer::dump(matches, output, build_info).unwrap();
