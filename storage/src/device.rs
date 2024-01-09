@@ -77,8 +77,8 @@ bitflags! {
         const CAP_TAR_TOC = 0x4000_0000;
         /// Rafs V5 image without extended blob table, this is an internal flag.
         const _V5_NO_EXT_BLOB_TABLE = 0x8000_0000;
-        /// Blob is generated with chunkdict
-        const IS_CHUNKDICT_GENERATED = 0x0000_0200;
+        // /// Blob is generated with chunkdict
+        // const IS_CHUNKDICT_GENERATED = 0x0000_0200;
     }
 }
 

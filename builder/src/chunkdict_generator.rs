@@ -21,7 +21,7 @@ use crate::NodeChunk;
 use anyhow::Result;
 use nydus_rafs::metadata::chunk::ChunkWrapper;
 use nydus_rafs::metadata::inode::InodeWrapper;
-use nydus_rafs::metadata::layout::{RafsBlobTable, RafsXAttrs};
+use nydus_rafs::metadata::layout::RafsXAttrs;
 use nydus_storage::meta::BlobChunkInfoV1Ondisk;
 use nydus_utils::digest::RafsDigest;
 use std::ffi::OsString;

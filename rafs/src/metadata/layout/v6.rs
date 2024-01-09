@@ -1879,10 +1879,19 @@ impl RafsV6BlobTable {
         for idx in 0..(blob_table_size as usize / size_of::<RafsV6Blob>()) {
             let mut blob = RafsV6Blob::default();
             r.read_exact(blob.as_mut())?;
-            if !blob.validate(idx as u32, chunk_size, flags) {
+            let blob_info = blob.to_blob_info()?;
+            trace!(
+                "blob_info index {}, chunk_count {} blob_id {:?}, is_chunkdict {}",
+                blob_info.blob_index(),
+                blob_info.chunk_count(),
+                blob_info.blob_id(),
+                blob_info.is_chunkdict_generated(),
+            );
+            if !blob_info.is_chunkdict_generated() && !blob.validate(idx as u32, chunk_size, flags)
+            {
                 return Err(einval!("invalid Rafs v6 blob entry"));
             }
-            let blob_info = blob.to_blob_info()?;
+
             self.entries.push(Arc::new(blob_info));
         }
 
@@ -2730,6 +2739,7 @@ mod tests {
             [0; 32],
             0,
             0,
+            false,
             BlobCompressionContextHeader::default(),
             Arc::new(crypt::Algorithm::Aes128Xts.new_cipher().unwrap()),
             Some(CipherContext::default()),
@@ -2772,6 +2782,7 @@ mod tests {
             [0; 32],
             0,
             0,
+            false,
             BlobCompressionContextHeader::default(),
             Arc::new(crypt::Algorithm::Aes128Xts.new_cipher().unwrap()),
             Some(CipherContext::default()),
