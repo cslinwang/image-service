@@ -597,6 +597,9 @@ impl BlobContext {
         blob_ctx
             .blob_meta_header
             .set_encrypted(features.contains(BlobFeatures::ENCRYPTED));
+        blob_ctx
+            .blob_meta_header
+            .set_is_chunkdict_generated(features.contains(BlobFeatures::IS_CHUNKDICT_GENERATED));
 
         blob_ctx
     }

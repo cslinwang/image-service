@@ -354,6 +354,15 @@ impl BlobCompressionContextHeader {
             )
         }
     }
+
+    /// Set flag indicating whether it's a blob for batch chunk or not.
+    pub fn set_is_chunkdict_generated(&mut self, enable: bool) {
+        if enable {
+            self.s_features |= BlobFeatures::IS_CHUNKDICT_GENERATED.bits();
+        } else {
+            self.s_features &= !BlobFeatures::IS_CHUNKDICT_GENERATED.bits();
+        }
+    }
 }
 
 /// Struct to manage blob chunk compression information, a wrapper over [BlobCompressionContext].

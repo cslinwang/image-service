@@ -1311,6 +1311,9 @@ impl Command {
         build_ctx.blob_storage = Some(chunkdict_bootstrap_path);
         build_ctx.blob_features = BlobFeatures::CAP_TAR_TOC;
         build_ctx.blob_features.insert(BlobFeatures::ALIGNED);
+        build_ctx
+            .blob_features
+            .insert(BlobFeatures::IS_CHUNKDICT_GENERATED);
         // Build_ctx.blob_features.insert(BlobFeatures::CHUNK_INFO_V2);
         // Build_ctx.blob_features.insert(BlobFeatures::ENCRYPTED);
         build_ctx.features = features;

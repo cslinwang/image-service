@@ -78,7 +78,7 @@ bitflags! {
         /// Rafs V5 image without extended blob table, this is an internal flag.
         const _V5_NO_EXT_BLOB_TABLE = 0x8000_0000;
         // /// Blob is generated with chunkdict
-        // const IS_CHUNKDICT_GENERATED = 0x0000_0200;
+        const IS_CHUNKDICT_GENERATED = 0x0000_0200;
     }
 }
 

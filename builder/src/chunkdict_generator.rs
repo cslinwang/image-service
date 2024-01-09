@@ -172,7 +172,7 @@ impl Generator {
         let node_info = NodeInfo {
             explicit_uidgid: true,
             src_dev: 0,
-            src_ino: 0,
+            src_ino: 1,
             rdev: 0,
             source: PathBuf::from("/"),
             path: PathBuf::from("/chunkdict"),

@@ -1696,6 +1696,11 @@ impl RafsV6Blob {
             Ok(v) => v,
             Err(_) => return false,
         };
+        warn!(
+            "RafsV6Blob: idx {} is chunkdict generated {}",
+            blob_index,
+            blob_features.contains(BlobFeatures::IS_CHUNKDICT_GENERATED),
+        );
         let tarfs_mode = flags.contains(RafsSuperFlags::TARTFS_MODE);
         match (blob_features.contains(BlobFeatures::ALIGNED), tarfs_mode) {
             (false, false) => {
@@ -1754,7 +1759,8 @@ impl RafsV6Blob {
                 blob_features.bits()
             );
             return false;
-        } else if !tarfs_mode
+        } else if !blob_features.contains(BlobFeatures::IS_CHUNKDICT_GENERATED)
+            && !tarfs_mode
             && ci_uncompr_size != count * size_of::<BlobChunkInfoV1Ondisk>() as u64
         {
             error!(
@@ -1851,9 +1857,8 @@ impl RafsV6BlobTable {
         blob_info.set_blob_meta_size(blob_meta_size);
         blob_info.set_blob_toc_size(blob_toc_size);
         blob_info.set_cipher_info(flags.into(), cipher_object, cipher_context);
-        if is_chunkdict {
-            blob_info.set_chunkdict_generated(true);
-        }
+
+        blob_info.set_chunkdict_generated(is_chunkdict);
 
         self.entries.push(Arc::new(blob_info));
 
@@ -1880,18 +1885,9 @@ impl RafsV6BlobTable {
             let mut blob = RafsV6Blob::default();
             r.read_exact(blob.as_mut())?;
             let blob_info = blob.to_blob_info()?;
-            trace!(
-                "blob_info index {}, chunk_count {} blob_id {:?}, is_chunkdict {}",
-                blob_info.blob_index(),
-                blob_info.chunk_count(),
-                blob_info.blob_id(),
-                blob_info.is_chunkdict_generated(),
-            );
-            if !blob_info.is_chunkdict_generated() && !blob.validate(idx as u32, chunk_size, flags)
-            {
+            if !blob.validate(idx as u32, chunk_size, flags) {
                 return Err(einval!("invalid Rafs v6 blob entry"));
             }
-
             self.entries.push(Arc::new(blob_info));
         }
 
