@@ -114,6 +114,7 @@ impl FileCacheMeta {
     }
 
     pub(crate) fn get_blob_meta(&self) -> Option<Arc<BlobCompressionContextInfo>> {
+        warn!("get_blob_meta");
         loop {
             let meta = self.meta.lock().unwrap();
             if meta.is_some() {
@@ -498,10 +499,34 @@ impl BlobCache for FileCacheEntry {
     }
 
     fn get_chunk_info(&self, chunk_index: u32) -> Option<Arc<dyn BlobChunkInfo>> {
-        self.meta
-            .as_ref()
-            .and_then(|v| v.get_blob_meta())
-            .map(|v| BlobMetaChunk::new(chunk_index as usize, &v.state))
+        // 尝试获取 self.meta 的引用
+        let meta_ref_option = self.meta.as_ref();
+        debug!(
+            "CMDebug: 1, meta_ref_option is some {}",
+            meta_ref_option.is_some()
+        );
+
+        // 使用 and_then 从 meta_ref 获取 blob_meta，如果存在的话
+        let blob_meta_option = meta_ref_option.and_then(|meta_ref| meta_ref.get_blob_meta());
+
+        debug!(
+            "CMDebug: 2, blob_meta_option is some {}",
+            blob_meta_option.is_some()
+        );
+        // 将 blob_meta_option 映射到 BlobMetaChunk
+        let blob_meta_chunk_option = blob_meta_option
+            .map(|blob_meta| BlobMetaChunk::new(chunk_index as usize, &blob_meta.state));
+        debug!(
+            "CMDebug: 3 blob_meta_chunk_option is some {}",
+            blob_meta_chunk_option.is_some()
+        );
+
+        // 现在 blob_meta_chunk_option 包含最终结果或者是 None，取决于前面操作的结果
+        blob_meta_chunk_option
+        // self.meta
+        //     .as_ref()
+        //     .and_then(|v| v.get_blob_meta())
+        //     .map(|v| BlobMetaChunk::new(chunk_index as usize, &v.state))
     }
 
     fn get_blob_object(&self) -> Option<&dyn BlobObject> {

@@ -122,6 +122,12 @@ pub trait BlobReader: Send + Sync {
         let mut delayer = Delayer::new(DelayType::BackOff, Duration::from_millis(500));
 
         loop {
+            warn!(
+                "Read from backend, offset: {}, retry count: {}, buf size: {}",
+                offset,
+                retry_count,
+                buf.len()
+            );
             match self.try_read(buf, offset) {
                 Ok(size) => {
                     self.metrics().end(&begin_time, buf.len(), false);

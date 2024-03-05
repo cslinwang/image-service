@@ -21,6 +21,7 @@ use nydus_storage::meta::{
 use nydus_storage::{RAFS_MAX_CHUNKS_PER_BLOB, RAFS_MAX_CHUNK_SIZE};
 use nydus_utils::crypt::{self, Cipher, CipherContext};
 use nydus_utils::{compress, digest, round_up, ByteSize};
+use storage::meta::format_blob_features;
 
 use crate::metadata::inode::InodeWrapper;
 use crate::metadata::layout::v5::RafsV5ChunkInfo;
@@ -1696,11 +1697,11 @@ impl RafsV6Blob {
             Ok(v) => v,
             Err(_) => return false,
         };
-        warn!(
-            "RafsV6Blob: idx {} is chunkdict generated {}",
-            blob_index,
-            blob_features.contains(BlobFeatures::IS_CHUNKDICT_GENERATED),
-        );
+        // warn!(
+        //     "RafsV6Blob: idx {} is chunkdict generated {}",
+        //     blob_index,
+        //     blob_features.contains(BlobFeatures::IS_CHUNKDICT_GENERATED),
+        // );
         let tarfs_mode = flags.contains(RafsSuperFlags::TARTFS_MODE);
         match (blob_features.contains(BlobFeatures::ALIGNED), tarfs_mode) {
             (false, false) => {
@@ -1885,6 +1886,19 @@ impl RafsV6BlobTable {
             let mut blob = RafsV6Blob::default();
             r.read_exact(blob.as_mut())?;
             let blob_info = blob.to_blob_info()?;
+            warn!(
+                "blob_info index {}, chunk_count {} blob_id {:?}, ci_uncompressed_size {}, ci_compressed_size {}, compressor {}, fearutres {}, is chunkdict generated {}",
+                blob_info.blob_index(),
+                blob_info.chunk_count(),
+                blob_info.blob_id(),
+                blob_info.meta_ci_uncompressed_size(),
+                blob_info.meta_ci_compressed_size(),
+                blob_info.meta_ci_compressor(),
+                format_blob_features(blob_info.features()),
+                blob_info
+                    .features()
+                    .contains(BlobFeatures::IS_CHUNKDICT_GENERATED),
+            );
             if !blob.validate(idx as u32, chunk_size, flags) {
                 return Err(einval!("invalid Rafs v6 blob entry"));
             }

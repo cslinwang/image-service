@@ -266,7 +266,13 @@ impl FileCacheEntry {
                 );
                 return Err(einval!(msg));
             }
-            let meta = if blob_info.meta_ci_is_valid() {
+            debug!(
+                "blob info, is chunkdict generated: {}",
+                blob_info.has_feature(BlobFeatures::IS_CHUNKDICT_GENERATED)
+            );
+            let meta = if blob_info.meta_ci_is_valid()
+                || blob_info.has_feature(BlobFeatures::IS_CHUNKDICT_GENERATED)
+            {
                 let meta = FileCacheMeta::new(
                     blob_file_path,
                     blob_info.clone(),
@@ -289,6 +295,8 @@ impl FileCacheEntry {
                 need_validation,
             )
         };
+
+        debug!("CMdebug: meta is some: {}", meta.is_some());
 
         let (cache_cipher_object, cache_cipher_context) = if mgr.cache_encrypted {
             let key = hex::decode(mgr.cache_encryption_key.clone())

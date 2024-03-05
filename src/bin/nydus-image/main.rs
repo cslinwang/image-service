@@ -1257,9 +1257,12 @@ impl Command {
             };
         }
         info!("Chunkdict metadata is saved at: {:?}", db_url);
-
+        warn!(
+            "Metadata is saved in the database, please do not use the database for other purposes"
+        );
         // Connecting database and Generating chunk dictionary by algorithm "exponential_smoothing"
         let db_strs: Vec<&str> = db_url.split("://").collect();
+        warn! {"db_url:{}", db_url};
         if db_strs.len() != 2 || (!db_strs[1].starts_with('/') && !db_strs[1].starts_with(':')) {
             bail!("Invalid database URL: {}", db_url);
         }
@@ -1270,11 +1273,16 @@ impl Command {
             .unwrap();
 
         let (chunkdict, noise_points): (Vec<ChunkdictChunkInfo>, Vec<String>);
-
+        warn! {"{}",1};
         match db_strs[0] {
             "sqlite" => {
+                warn!(
+                    "Connecting database and Generating chunk dictionary by algorithm: {}",
+                    algorithm
+                );
                 let mut algorithm: deduplicate::Algorithm<SqliteDatabase> =
                     deduplicate::Algorithm::<SqliteDatabase>::new(algorithm, db_strs[1])?;
+                warn!("Generating chunk dictionary by sqlite: {}", db_strs[0]);
                 let result = algorithm.chunkdict_generate()?;
                 chunkdict = result.0;
                 noise_points = result.1;
@@ -1314,6 +1322,11 @@ impl Command {
         build_ctx
             .blob_features
             .insert(BlobFeatures::IS_CHUNKDICT_GENERATED);
+        build_ctx
+            .blob_features
+            .insert(BlobFeatures::INLINED_CHUNK_DIGEST);
+        build_ctx.blob_features.insert(BlobFeatures::HAS_TAR_HEADER);
+        build_ctx.blob_features.insert(BlobFeatures::HAS_TOC);
         // Build_ctx.blob_features.insert(BlobFeatures::CHUNK_INFO_V2);
         // Build_ctx.blob_features.insert(BlobFeatures::ENCRYPTED);
         build_ctx.features = features;
@@ -1614,13 +1627,15 @@ impl Command {
         let mut blob_ids = Vec::new();
         for (idx, blob) in blobs.iter().enumerate() {
             println!(
-                "\t {}: {}, compressed data size 0x{:x}, compressed file size 0x{:x}, uncompressed file size 0x{:x}, chunks: 0x{:x}, features: {}",
+                "\t {}: {}, compressed data size 0x{:x}, compressed file size 0x{:x}, uncompressed file size 0x{:x}, chunks: 0x{:x}, ci compressed size 0x{:x}, ci uncompressed size 0x{:x}, features: {}",
                 idx,
                 blob.blob_id(),
                 blob.compressed_data_size(),
                 blob.compressed_size(),
                 blob.uncompressed_size(),
                 blob.chunk_count(),
+                blob.meta_ci_compressed_size(),
+                blob.meta_ci_uncompressed_size(),
                 format_blob_features(blob.features()),
             );
             blob_ids.push(blob.blob_id().to_string());

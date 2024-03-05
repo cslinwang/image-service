@@ -537,6 +537,8 @@ impl OndiskInodeWrapper {
         is_tarfs_mode: bool,
         is_tail: bool,
     ) -> Option<BlobIoDesc> {
+        warn!("Entering make_chunk_io: chunk_addr={:?}, content_offset={}, content_len={}, user_io={}, is_tarfs_mode={}, is_tail={}",
+           chunk_addr, content_offset, content_len, user_io, is_tarfs_mode, is_tail);
         let blob_index = match chunk_addr.blob_index() {
             Err(e) => {
                 warn!(
@@ -563,8 +565,10 @@ impl OndiskInodeWrapper {
                     } else {
                         self.chunk_size()
                     };
+                    warn!("v6: tarfs mode, chunk size {}", size);
                     let chunk = TarfsChunkInfoV6::from_chunk_addr(chunk_addr, size).ok()?;
                     let chunk = Arc::new(chunk) as Arc<dyn BlobChunkInfo>;
+                    warn!("Tarfs mode: chunk created for chunk_addr: {:?}", chunk_addr);
                     Some(BlobIoDesc::new(
                         blob,
                         chunk.into(),
@@ -574,6 +578,11 @@ impl OndiskInodeWrapper {
                     ))
                 } else {
                     let chunk_index = chunk_addr.blob_ci_index();
+                    warn!(
+                        "Non-tarfs mode: creating io chunk for blob_index={}, chunk_index={}",
+                        blob.blob_index(),
+                        chunk_index
+                    );
                     device
                         .create_io_chunk(blob.blob_index(), chunk_index)
                         .map(|v| BlobIoDesc::new(blob, v, content_offset, content_len, user_io))
@@ -792,6 +801,10 @@ impl RafsInode for OndiskInodeWrapper {
         size: usize,
         user_io: bool,
     ) -> Result<Vec<BlobIoVec>> {
+        warn!(
+            "alloc_bio_vecs called with offset: {}, size: {}",
+            offset, size
+        );
         let state = self.state();
         let chunk_size = self.chunk_size();
         let head_chunk_index = offset / chunk_size as u64;
@@ -805,6 +818,7 @@ impl RafsInode for OndiskInodeWrapper {
             .chunk_addresses(&state, head_chunk_index as u32)
             .map_err(err_invalidate_data)?;
         if chunks.is_empty() {
+            warn!("No chunks found for the given offset and size.");
             return Ok(vec);
         }
 
@@ -814,6 +828,12 @@ impl RafsInode for OndiskInodeWrapper {
         let content_offset = (offset % chunk_size as u64) as u32;
         let mut left = std::cmp::min(self.size() - offset, size as u64) as u32;
         let mut content_len = std::cmp::min(chunk_size - content_offset, left);
+
+        warn!(
+            "Preparing to create chunk IO: curr_chunk_index={}, content_offset={}, content_len={}",
+            curr_chunk_index, content_offset, content_len
+        );
+
         let desc = self
             .make_chunk_io(
                 &state,
@@ -826,6 +846,13 @@ impl RafsInode for OndiskInodeWrapper {
                 curr_chunk_index == tail_chunk_index,
             )
             .ok_or_else(|| einval!("failed to get chunk information"))?;
+        warn!("Chunk IO description: {:?}", desc);
+        warn!(
+            "Desc info: blob_index={}, blob_chunk_index={}",
+            desc.blob.blob_index(),
+            desc.chunkinfo.blob_index()
+        );
+        warn!("Chunk IO created successfully.");
 
         let mut descs = BlobIoVec::new(desc.blob.clone());
         descs.push(desc);

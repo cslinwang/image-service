@@ -113,6 +113,19 @@ impl Database for SqliteDatabase {
     }
 
     fn insert_chunk(&self, chunk: &ChunkdictChunkInfo) -> Result<()> {
+        // 临时校验。
+        let is_skip = true;
+        if is_skip {}
+        if chunk.chunk_compressed_size == 0 {
+            let _chunks = self.chunk_table.list_by_chunk_digest(&chunk.chunk_digest)?;
+        }
+        // if !chunks.is_empty() {
+        //     warn!(
+        //         "repetition chunk_digest: {}, chunk size: {}",
+        //         chunk.chunk_digest,
+        //         chunks.len()
+        //     );
+        // }
         self.chunk_table
             .insert(chunk)
             .context("Failed to insert chunk")
@@ -233,11 +246,26 @@ impl Deduplicate<SqliteDatabase> {
         image_reference: String,
         version: String,
     ) -> anyhow::Result<()> {
+        let mut chunk_blob_id_count = HashMap::new();
+        let mut chunk_id_list = Vec::new();
+        let mut repetition_chunk_id_list = Vec::new();
+        let mut chunk_num = 0;
         let process_chunk = &mut |t: &Tree| -> Result<()> {
             let node = t.lock_node();
+            chunk_num += node.chunks.len();
             for chunk in &node.chunks {
                 let index = chunk.inner.blob_index();
                 let chunk_blob_id = blob_infos[index as usize].blob_id();
+                let chunk_id = chunk.inner.id().to_string();
+                if !chunk_id_list.contains(&chunk_id) {
+                    chunk_id_list.push(chunk_id);
+                } else {
+                    repetition_chunk_id_list.push(chunk_id);
+                }
+
+                *chunk_blob_id_count
+                    .entry(chunk_blob_id.clone())
+                    .or_insert(0) += 1;
                 self.db
                     .insert_chunk(&ChunkdictChunkInfo {
                         image_reference: image_reference.to_string(),
@@ -256,6 +284,17 @@ impl Deduplicate<SqliteDatabase> {
         let tree = Tree::from_bootstrap(sb, &mut ())
             .context("Failed to load bootstrap for deduplication.")?;
         tree.walk_dfs_pre(process_chunk)?;
+        warn!("chunk num: {}", chunk_num);
+        warn!("chunk id list size: {}", chunk_id_list.len());
+        warn!(
+            "repetition chunk id list size: {}",
+            repetition_chunk_id_list.len()
+        );
+        // 打印chunk_blob_id的统计信息
+        for (blob_id, count) in &chunk_blob_id_count {
+            warn!("chunk_blob_id: {}, count: {}", blob_id, count);
+        }
+
         Ok(())
     }
 }
@@ -283,37 +322,102 @@ impl Algorithm<SqliteDatabase> {
         let mut chunkdict: Vec<ChunkdictChunkInfo> = Vec::new();
         let mut core_image = Vec::new();
         let mut noise_points = Vec::new();
-        let (chunkdict_version, chunkdict_image) = match &self.algorithm_name as &str {
-            "exponential_smoothing" => Self::deduplicate_version(&all_chunks)?,
-            _ => {
-                bail!("Unsupported algorithm name:, please use a valid algorithm name, such as exponential_smoothing")
+        let is_test = true;
+        warn!("start chunk dict generate");
+        if is_test {
+            let blob_id = "73483061f74471da1b80947688b92bf0fd853e8456a6d662829cf7ec88785e8d";
+            let chunks = self.db.get_chunks_by_blob_id(&blob_id)?;
+            // 去重
+            chunkdict = chunks
+                .into_iter()
+                .collect::<std::collections::HashSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>();
+            warn!("chunkdict size: {}", chunkdict.len());
+            Self::fill_chunks(self, &mut chunkdict)?;
+
+            warn!("chunkdict size: {}", chunkdict.len());
+
+            Ok((chunkdict, noise_points))
+        } else {
+            let (chunkdict_version, chunkdict_image) = match &self.algorithm_name as &str {
+                "exponential_smoothing1" => Self::deduplicate_version(&all_chunks)?,
+                _ => {
+                    bail!("Unsupported algorithm name:, please use a valid algorithm name, such as exponential_smoothing")
+                }
+            };
+            for single_clustering in chunkdict_image {
+                for (image_list, cluster_dictionary) in single_clustering {
+                    core_image.extend(image_list);
+                    chunkdict.extend(cluster_dictionary);
+                }
             }
-        };
-        for single_clustering in chunkdict_image {
-            for (image_list, cluster_dictionary) in single_clustering {
-                core_image.extend(image_list);
-                chunkdict.extend(cluster_dictionary);
+            for (_, dictionary) in chunkdict_version {
+                chunkdict.extend(dictionary);
             }
-        }
-        for (_, dictionary) in chunkdict_version {
-            chunkdict.extend(dictionary);
-        }
-        let mut chunkdict_size = 0;
-        for i in &chunkdict {
-            chunkdict_size += i.chunk_compressed_size;
-        }
-        info!(
-            "Chunkdict size is {}",
-            chunkdict_size as f64 / 1024 as f64 / 1024 as f64
-        );
-        for chunk in all_chunks {
-            if !core_image.contains(&chunk.image_reference)
-                && !noise_points.contains(&chunk.image_reference)
-            {
-                noise_points.push(chunk.image_reference.clone());
+            let mut chunkdict_size = 0;
+            for i in &chunkdict {
+                chunkdict_size += i.chunk_compressed_size;
             }
+            info!(
+                "Chunkdict size is {}",
+                chunkdict_size as f64 / 1024 as f64 / 1024 as f64
+            );
+            for chunk in all_chunks {
+                if !core_image.contains(&chunk.image_reference)
+                    && !noise_points.contains(&chunk.image_reference)
+                {
+                    noise_points.push(chunk.image_reference.clone());
+                }
+            }
+            warn!("chunkdict size: {}", chunkdict.len());
+            Self::fill_chunks(self, &mut chunkdict)?;
+
+            warn!("chunkdict size: {}", chunkdict.len());
+
+            Ok((chunkdict, noise_points))
         }
-        Ok((chunkdict, noise_points))
+    }
+
+    /// Baseed blob id to fill all chunks
+    fn fill_chunks(&mut self, chunkdict: &mut Vec<ChunkdictChunkInfo>) -> Result<()> {
+        // 获取所有的 blob id
+        let mut blob_ids = std::collections::HashSet::new();
+        // 测试部分
+        for chunk in chunkdict.iter() {
+            blob_ids.insert(chunk.chunk_blob_id.clone());
+        }
+        if blob_ids.is_empty() {
+            blob_ids.insert(
+                "2588120a2e447d9922eacde2e0e6698b7332c58ff2dfec4224a49ad0dcffecdd".to_owned(),
+            );
+        }
+        // 根据id 查询所有的 chunk
+        for blob_id in blob_ids {
+            let mut chunks = self.db.get_chunks_by_blob_id(&blob_id)?;
+            // 去重
+            chunks = chunks
+                .into_iter()
+                .collect::<std::collections::HashSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>();
+            warn!("blob id: {}, chunk size: {}", blob_id, chunks.len());
+            // let fill_chunk = chunks[0].clone();
+            for chunk in chunks {
+                if !chunkdict.contains(&chunk) {
+                    chunkdict.push(chunk);
+                }
+            }
+
+            // if blob_id == "73483061f74471da1b80947688b92bf0fd853e8456a6d662829cf7ec88785e8d" {
+            //     let num = 3080 - 3066;
+            //     for _i in 0..num {
+            //         let chunk = fill_chunk.clone();
+            //         chunkdict.push(chunk);
+            //     }
+            // }
+        }
+        Ok(())
     }
 
     // Algorithm "exponential_smoothing"
@@ -755,7 +859,7 @@ impl Algorithm<SqliteDatabase> {
         let mut threshold = 0.5;
         let max_threshold = 0.8;
 
-        let mut test_total_size = 0;
+        let mut test_total_size: u32 = 0;
         let mut min_test_size: u32 = std::u32::MAX;
         let mut min_data_dict = HashMap::new();
 
@@ -802,7 +906,9 @@ impl Algorithm<SqliteDatabase> {
                     }
                 }
                 for chunk in point.chunk_list.iter() {
-                    test_total_size += chunk.chunk_compressed_size;
+                    test_total_size = test_total_size
+                        .checked_add(chunk.chunk_compressed_size)
+                        .unwrap_or(test_total_size);
                 }
             }
             if test_total_size <= min_test_size {
@@ -908,6 +1014,41 @@ impl ChunkTable {
                 ORDER BY id LIMIT ?2 OFFSET ?3",
             )?;
         let chunk_iterator = stmt.query_map(params![blob_id, limit, offset], |row| {
+            Ok(ChunkdictChunkInfo {
+                image_reference: row.get(1)?,
+                version: row.get(2)?,
+                chunk_blob_id: row.get(3)?,
+                chunk_digest: row.get(4)?,
+                chunk_compressed_size: row.get(5)?,
+                chunk_uncompressed_size: row.get(6)?,
+                chunk_compressed_offset: row.get(7)?,
+                chunk_uncompressed_offset: row.get(8)?,
+            })
+        })?;
+        let mut chunks = Vec::new();
+        for chunk in chunk_iterator {
+            chunks.push(chunk.map_err(DatabaseError::SqliteError)?);
+        }
+        Ok(chunks)
+    }
+
+    // select by chunk_digest
+    fn list_by_chunk_digest(
+        &self,
+        chunk_digest: &str,
+    ) -> Result<Vec<ChunkdictChunkInfo>, DatabaseError> {
+        let conn_guard = self
+            .conn
+            .lock()
+            .map_err(|e| DatabaseError::PoisonError(e.to_string()))?;
+        let mut stmt: rusqlite::Statement<'_> = conn_guard
+            .prepare(
+                "SELECT id, image_reference, version, chunk_blob_id, chunk_digest, chunk_compressed_size,
+                chunk_uncompressed_size, chunk_compressed_offset, chunk_uncompressed_offset from chunk
+                WHERE chunk_digest = ?1
+                ORDER BY id",
+            )?;
+        let chunk_iterator = stmt.query_map(params![chunk_digest], |row| {
             Ok(ChunkdictChunkInfo {
                 image_reference: row.get(1)?,
                 version: row.get(2)?,
@@ -1291,7 +1432,7 @@ mod tests {
         };
         chunk_table.insert(&chunk)?;
         let chunk2 = ChunkdictChunkInfo {
-            image_reference: "REDIS".to_string(),
+            image_reference: "REDIS02".to_string(),
             version: "1.0.0".to_string(),
             chunk_blob_id: "BLOB456".to_string(),
             chunk_digest: "DIGEST123".to_string(),
@@ -1325,6 +1466,9 @@ mod tests {
         assert_eq!(chunks[0].chunk_blob_id, chunk.chunk_blob_id);
         assert_eq!(chunks.len(), 1);
 
+        let chunks = chunk_table.list_by_chunk_digest(&chunk.image_reference)?;
+        warn!("chunks is {:?}", chunks);
+        assert_eq!(chunks[0].image_reference, chunk.image_reference);
         Ok(())
     }
 

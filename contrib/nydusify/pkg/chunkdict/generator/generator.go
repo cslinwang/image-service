@@ -119,7 +119,8 @@ func (generator *Generator) Generate(ctx context.Context) error {
 		return err
 	}
 
-	return os.RemoveAll(generator.WorkDir)
+	// return os.RemoveAll(generator.WorkDir)
+	return nil
 }
 
 // Pull the bootstrap of nydus image

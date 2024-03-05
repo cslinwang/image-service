@@ -1275,6 +1275,10 @@ impl BlobDevice {
         if (blob_index as usize) < self.blob_count {
             let state = self.blobs.load();
             let blob = &state[blob_index as usize];
+            warn!(
+                "create_io_chunk: blob_index: {}, chunk_index: {}, blob_count: {}",
+                blob_index, chunk_index, self.blob_count,
+            );
             blob.get_chunk_info(chunk_index).map(|v| v.into())
         } else {
             None

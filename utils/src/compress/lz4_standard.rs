@@ -43,6 +43,18 @@ pub(super) fn lz4_decompress(src: &[u8], dst: &mut [u8]) -> Result<usize> {
         return Err(einval!("given size parameter is too big"));
     }
 
+    // 打印 src 的长度和前几个字节
+    warn!("src len: {}", src.len());
+    if !src.is_empty() {
+        warn!(
+            "src data (first 10 bytes or full length): {:?}",
+            &src[..std::cmp::min(10, src.len())]
+        );
+    }
+
+    // 打印 dst 的长度
+    warn!("dst len: {}", dst.len());
+
     let dec_bytes = unsafe {
         LZ4_decompress_safe(
             src.as_ptr() as *const c_char,
@@ -51,6 +63,7 @@ pub(super) fn lz4_decompress(src: &[u8], dst: &mut [u8]) -> Result<usize> {
             size,
         )
     };
+    warn!("decompress size: {}", dec_bytes);
 
     if dec_bytes < 0 {
         return Err(eio!("decompression failed"));

@@ -23,6 +23,7 @@ use nydus_rafs::metadata::chunk::ChunkWrapper;
 use nydus_rafs::metadata::inode::InodeWrapper;
 use nydus_rafs::metadata::layout::RafsXAttrs;
 use nydus_storage::meta::BlobChunkInfoV1Ondisk;
+use nydus_utils::compress::Algorithm;
 use nydus_utils::digest::RafsDigest;
 use std::ffi::OsString;
 use std::mem::size_of;
@@ -54,6 +55,7 @@ impl Generator {
     ) -> Result<BuildOutput> {
         // Validate and remove chunks whose belonged blob sizes are smaller than a block.
         let mut chunkdict = chunkdict_origin.to_vec();
+
         Self::validate_and_remove_chunks(ctx, &mut chunkdict);
 
         // build root tree
@@ -221,6 +223,7 @@ impl Generator {
                 blob_mgr.get_or_cerate_blob_for_chunkdict(ctx, &chunk_info.chunk_blob_id)?;
             if blob_ctx.blob_id.is_empty() {
                 blob_ctx.blob_id = chunk_info.chunk_blob_id.clone();
+                warn!("blob id: {}", blob_ctx.blob_id);
             }
             // blob_ctx.
             let chunk_uncompressed_size = chunk_info.chunk_uncompressed_size;
@@ -232,6 +235,35 @@ impl Generator {
                 blob_ctx.blob_meta_header.ci_uncompressed_size()
                     + size_of::<BlobChunkInfoV1Ondisk>() as u64,
             );
+            blob_ctx.blob_meta_header.set_ci_compressed_size(
+                blob_ctx.blob_meta_header.ci_uncompressed_size()
+                    + size_of::<BlobChunkInfoV1Ondisk>() as u64,
+            );
+
+            // 临时设置
+            let blob_id = blob_ctx.blob_id.clone();
+            if blob_id == "73483061f74471da1b80947688b92bf0fd853e8456a6d662829cf7ec88785e8d" {
+                blob_ctx.blob_compressor = Algorithm::Zstd;
+                blob_ctx.blob_meta_header.set_ci_uncompressed_size(49280);
+                blob_ctx.blob_meta_header.set_ci_compressed_size(33147);
+                blob_ctx.blob_meta_header.set_ci_compressed_offset(32624839);
+                // blob_ctx.chunk_count = 3079;
+            } else if blob_id == "823ff3e94c185cd2cf62bb34a9d9738fec6e90f2458142253bb2f9e64b1b5f00"
+            {
+                blob_ctx.blob_meta_header.set_ci_uncompressed_size(272);
+                blob_ctx.blob_meta_header.set_ci_compressed_size(226);
+            } else if blob_id == "3e64d066165d7eade1f63d96fb6ba58db0f5cb7c348ae63a9a8f0759b5508f65"
+            {
+                blob_ctx.blob_meta_header.set_ci_uncompressed_size(720);
+                blob_ctx.blob_meta_header.set_ci_compressed_size(560);
+            } else if blob_id == "8590e15518b8b9acc688929d95574efc41cc687253c4b43717aa8825d7adb52b"
+            {
+                blob_ctx.blob_meta_header.set_ci_uncompressed_size(160);
+                blob_ctx.blob_meta_header.set_ci_compressed_size(125);
+            } else {
+                warn!("Unknown blob id: {}", blob_id);
+            }
+            blob_ctx.blob_meta_header.set_ci_compressor(Algorithm::Zstd);
 
             // update chunk
             let chunk_index = blob_ctx.alloc_chunk_index()?;

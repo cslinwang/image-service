@@ -1148,6 +1148,7 @@ impl BlobManager {
                         ctx.cipher_object.clone(),
                         ctx.cipher_ctx.clone(),
                     );
+                    warn!("blob table: {:?}", table);
                 }
             }
         }

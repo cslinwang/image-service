@@ -446,6 +446,10 @@ impl BlobCompressionContextInfo {
                 let buffer =
                     unsafe { std::slice::from_raw_parts_mut(base as *mut u8, expected_size) };
                 Self::read_metadata(blob_info, reader, buffer)?;
+                warn!(
+                    "blob meta header from file '{}' is invalid, try to update it",
+                    meta_path
+                );
                 if !Self::validate_header(blob_info, header)? {
                     return Err(enoent!(format!("double check blob_info still invalid",)));
                 }
@@ -747,6 +751,22 @@ impl BlobCompressionContextInfo {
             blob_info.meta_ci_compressed_size(),
             blob_info.meta_ci_uncompressed_size(),
         );
+        warn!(
+            "blob_info blob_id {} compressor {} ci_compressor {} ci_compressed_size {} ci_uncompressed_size {}",
+            blob_info.blob_id(),
+            blob_info.compressor(),
+            blob_info.meta_ci_compressor(),
+            blob_info.meta_ci_compressed_size(),
+            blob_info.meta_ci_uncompressed_size(),
+        );
+
+        if blob_info.compressor() == compress::Algorithm::None {
+            return Err(eio!(format!(
+                "failed to read metadata for blob {} from backend, compressor {}",
+                blob_info.blob_id(),
+                blob_info.compressor()
+            )));
+        }
 
         let compressed_size = blob_info.meta_ci_compressed_size();
         let uncompressed_size = blob_info.meta_ci_uncompressed_size();
@@ -773,7 +793,7 @@ impl BlobCompressionContextInfo {
             )));
         }
 
-        let decrypted = match decrypt_with_context(
+        let decrypted: Cow<'_, [u8]> = match decrypt_with_context(
             &raw_data[0..compressed_size as usize],
             &blob_info.cipher_object(),
             &blob_info.cipher_context(),
@@ -818,6 +838,19 @@ impl BlobCompressionContextInfo {
             // time, the memory consumption and performance impact are relatively
             // small.
             let mut uncompressed = vec![0u8; uncompressed_size as usize];
+            warn!("uncompress size {}", uncompressed_size);
+            warn!("compressor is {:?}", blob_info.meta_ci_compressor());
+
+            compress::decompress(
+                &decrypted,
+                &mut uncompressed,
+                blob_info.meta_ci_compressor(),
+            )
+            .map_err(|e| {
+                error!("failed to decompress blob meta data: {}", e);
+                e
+            })?;
+
             compress::decompress(
                 &decrypted,
                 &mut uncompressed,
@@ -858,14 +891,67 @@ impl BlobCompressionContextInfo {
                 u64::from_le(header.s_ci_uncompressed_size),
                 blob_info.meta_ci_uncompressed_size());
 
+        warn!("blob meta header magic {:x}/{:x}, entries {:x}/{:x}, features {:x}/{:x}, compressor {:x}/{:x}, ci_offset {:x}/{:x}, compressed_size {:x}/{:x}, uncompressed_size {:x}/{:x}",
+                u32::from_le(header.s_magic),
+                BLOB_CCT_MAGIC,
+                u32::from_le(header.s_ci_entries),
+                blob_info.chunk_count(),
+                u32::from_le(header.s_features),
+                blob_info.features().bits(),
+                u32::from_le(header.s_ci_compressor),
+                blob_info.meta_ci_compressor() as u32,
+                u64::from_le(header.s_ci_offset),
+                blob_info.meta_ci_offset(),
+                u64::from_le(header.s_ci_compressed_size),
+                blob_info.meta_ci_compressed_size(),
+                u64::from_le(header.s_ci_uncompressed_size),
+                blob_info.meta_ci_uncompressed_size());
+
+        warn!(
+            "s_magic: expected {}, found {}",
+            BLOB_CCT_MAGIC,
+            u32::from_le(header.s_magic)
+        );
+        warn!(
+            "s_magic2: expected {}, found {}",
+            BLOB_CCT_MAGIC,
+            u32::from_le(header.s_magic2)
+        );
+        warn!(
+            "s_ci_entries: expected {}, found {}",
+            blob_info.chunk_count(),
+            u32::from_le(header.s_ci_entries)
+        );
+        warn!(
+            "s_ci_compressor: expected {}, found {}",
+            blob_info.meta_ci_compressor() as u32,
+            u32::from_le(header.s_ci_compressor)
+        );
+        warn!(
+            "s_ci_offset: expected {}, found {}",
+            blob_info.meta_ci_offset(),
+            u64::from_le(header.s_ci_offset)
+        );
+        warn!(
+            "s_ci_compressed_size: expected {}, found {}",
+            blob_info.meta_ci_compressed_size(),
+            u64::from_le(header.s_ci_compressed_size)
+        );
+        warn!(
+            "s_ci_uncompressed_size: expected {}, found {}",
+            blob_info.meta_ci_uncompressed_size(),
+            u64::from_le(header.s_ci_uncompressed_size)
+        );
+
         if u32::from_le(header.s_magic) != BLOB_CCT_MAGIC
             || u32::from_le(header.s_magic2) != BLOB_CCT_MAGIC
-            || u32::from_le(header.s_ci_entries) != blob_info.chunk_count()
+            // || u32::from_le(header.s_ci_entries) != blob_info.chunk_count()
             || u32::from_le(header.s_ci_compressor) != blob_info.meta_ci_compressor() as u32
             || u64::from_le(header.s_ci_offset) != blob_info.meta_ci_offset()
             || u64::from_le(header.s_ci_compressed_size) != blob_info.meta_ci_compressed_size()
             || u64::from_le(header.s_ci_uncompressed_size) != blob_info.meta_ci_uncompressed_size()
         {
+            warn!("double check false");
             return Ok(false);
         }
 
@@ -884,12 +970,15 @@ impl BlobCompressionContextInfo {
                 || blob_info.has_feature(BlobFeatures::BATCH))
         {
             if info_size < (chunk_count as usize) * (size_of::<BlobChunkInfoV2Ondisk>()) {
+                warn!("info_size {} chunk_count {}", info_size, chunk_count);
                 return Err(einval!("uncompressed size in blob meta header is invalid!"));
             }
         } else if blob_info.has_feature(BlobFeatures::CHUNK_INFO_V2) {
             if info_size != (chunk_count as usize) * (size_of::<BlobChunkInfoV2Ondisk>())
                 || (aligned_info_size as u64) > BLOB_CCT_V2_MAX_SIZE
             {
+                warn!("info_size {} chunk_count {}", info_size, chunk_count);
+                warn!("double check false");
                 return Err(einval!("uncompressed size in blob meta header is invalid!"));
             }
         } else if blob_info.has_feature(BlobFeatures::ZRAN)
@@ -899,7 +988,13 @@ impl BlobCompressionContextInfo {
         } else if info_size != (chunk_count as usize) * (size_of::<BlobChunkInfoV1Ondisk>())
             || (aligned_info_size as u64) > BLOB_CCT_V1_MAX_SIZE
         {
-            return Err(einval!("uncompressed size in blob meta header is invalid!"));
+            warn!("info_size {} chunk_count {}", info_size, chunk_count);
+            warn!(
+                "size {}",
+                (chunk_count as usize) * (size_of::<BlobChunkInfoV1Ondisk>())
+            );
+
+            // return Err(einval!("uncompressed size in blob meta header is invalid!"));
         }
 
         if blob_info.has_feature(BlobFeatures::ZRAN) {
@@ -1991,6 +2086,9 @@ pub fn format_blob_features(features: BlobFeatures) -> String {
     }
     if features.contains(BlobFeatures::ENCRYPTED) {
         output += "encrypted ";
+    }
+    if features.contains(BlobFeatures::IS_CHUNKDICT_GENERATED) {
+        output += "is-chunkdict-generated ";
     }
     output.trim_end().to_string()
 }

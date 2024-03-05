@@ -814,6 +814,12 @@ impl BlobReader for RegistryReader {
     }
 
     fn try_read(&self, buf: &mut [u8], offset: u64) -> BackendResult<usize> {
+        warn!(
+            "try read blob from registry: {}, offset: {}, len: {}",
+            self.blob_id,
+            offset,
+            buf.len()
+        );
         self.first.handle_force(&mut || -> BackendResult<usize> {
             self._try_read(buf, offset, true)
                 .map_err(BackendError::Registry)

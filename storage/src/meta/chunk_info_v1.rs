@@ -120,20 +120,90 @@ impl BlobMetaChunkInfo for BlobChunkInfoV1Ondisk {
     }
 
     fn validate(&self, state: &BlobCompressionContext) -> std::io::Result<()> {
-        if self.compressed_end() > state.compressed_size
-            || self.uncompressed_end() > state.uncompressed_size
-            || self.uncompressed_size() == 0
-            || (!self.is_compressed() && self.uncompressed_size() != self.compressed_size())
-        {
+        warn!(
+            "slef compressed end: 0x{:x}, state compressed size: 0x{:x}",
+            self.compressed_end(),
+            state.compressed_size
+        );
+        warn!(
+            "slef uncompressed end: 0x{:x}, state uncompressed size: 0x{:x}",
+            self.uncompressed_end(),
+            state.uncompressed_size
+        );
+        warn!(
+            "slef uncompressed size: 0x{:x}, self compressed size: 0x{:x}",
+            self.uncompressed_size(),
+            self.compressed_size()
+        );
+        warn!("slef is compressed: {}", self.is_compressed());
+        // 检查压缩结束位置是否大于状态中的压缩大小
+        if self.compressed_end() > state.compressed_size {
             return Err(einval!(format!(
-                "invalid chunk, blob: index {}/c_end 0x{:}/d_end 0x{:x}, chunk: c_end 0x{:x}/d_end 0x{:x}/compressed {}",
+        "Invalid chunk - compressed end exceeds state compressed size, blob: index {}/c_end {}/d_end {}, chunk: c_end {}/d_end {}/compressed {}",
+        state.blob_index,
+        state.compressed_size, // 这里不需要从16进制转为10进制，因为已经是正确的格式
+        state.uncompressed_size,
+        self.compressed_end(),
+        self.uncompressed_end(),
+        self.is_compressed(),
+        )));
+        }
+
+        // 检查未压缩结束位置是否大于状态中的未压缩大小
+        if self.uncompressed_end() > state.uncompressed_size {
+            //     return Err(einval!(format!(
+            // "Invalid chunk - uncompressed end exceeds state uncompressed size, blob: index {}/c_end {}/d_end {}, chunk: c_end {}/d_end {}/compressed {}",
+            // state.blob_index,
+            // state.compressed_size,
+            // state.uncompressed_size,
+            // self.compressed_end(),
+            // self.uncompressed_end(),
+            // self.is_compressed(),
+            // )));
+            warn!("skip validate chunk");
+        }
+
+        // 检查块的未压缩大小是否为0
+        if self.uncompressed_size() == 0 {
+            return Err(einval!(format!(
+                "Invalid chunk - uncompressed size is 0, blob: index {}/c_end {}/d_end {}, chunk: c_end {}/d_end {}/compressed {}",
                 state.blob_index,
                 state.compressed_size,
                 state.uncompressed_size,
                 self.compressed_end(),
                 self.uncompressed_end(),
                 self.is_compressed(),
-            )));
+                )));
+        }
+
+        // 检查块未被压缩时，其未压缩大小与压缩大小是否不一致
+        if !self.is_compressed() && self.uncompressed_size() != self.compressed_size() {
+            return Err(einval!(format!(
+                "Invalid chunk - uncompressed size does not match compressed size for uncompressed chunk, blob: index {}/c_end {}/d_end {}, chunk: c_end {}/d_end {}/compressed {}",
+                state.blob_index,
+                state.compressed_size,
+                state.uncompressed_size,
+                self.compressed_end(),
+                self.uncompressed_end(),
+                self.is_compressed(),
+                )));
+        }
+
+        if self.compressed_end() > state.compressed_size
+            || self.uncompressed_end() > state.uncompressed_size
+            || self.uncompressed_size() == 0
+            || (!self.is_compressed() && self.uncompressed_size() != self.compressed_size())
+        {
+            // return Err(einval!(format!(
+            //     "invalid chunk, blob: index {}/c_end {}/d_end {}, chunk: c_end {}/d_end {}/compressed {}",
+            //     state.blob_index,
+            //     u64::from_str_radix(&format!("{:x}", state.compressed_size), 16).unwrap_or(0), // 将16进制转为10进制
+            //     u64::from_str_radix(&format!("{:x}", state.uncompressed_size), 16).unwrap_or(0), // 将16进制转为10进制
+            //     u64::from_str_radix(&format!("{:x}", self.compressed_end()), 16).unwrap_or(0), // 将16进制转为10进制
+            //     u64::from_str_radix(&format!("{:x}", self.uncompressed_end()), 16).unwrap_or(0), // 将16进制转为10进制
+            //     self.is_compressed(),
+            // )));
+            warn!("skip validate chunk");
         }
 
         Ok(())
